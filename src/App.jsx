@@ -179,8 +179,8 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
       <h1 className="ts-h1">Stérilisateurs</h1>
       <p className="ts-lead">
         Ajoute chaque stérilisateur une seule fois. Le numéro de cycle de départ est celui
-        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système —
-        chaque nouvelle charge l'augmente de 1 automatiquement.
+        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système chaque 
+        nouvelle charge l'augmente de 1 automatiquement.
       </p>
 
       <div className="ts-card ts-form-row">
