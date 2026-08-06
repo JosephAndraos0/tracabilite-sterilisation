@@ -187,7 +187,7 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
       <h1 className="ts-h1">Stérilisateurs</h1>
       <p className="ts-lead">
         Ajoute chaque stérilisateur une seule fois. Le numéro de cycle de départ est celui
-        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système —
+        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système 
         chaque nouvelle charge l'augmente de 1 automatiquement.
       </p>
 
@@ -304,7 +304,7 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
     <div>
       <h1 className="ts-h1">Nouvelle charge</h1>
       <p className="ts-lead">
-        Choisis le stérilisateur et démarre la charge, puis ajoute les sachets un par un —
+        Choisis le stérilisateur et démarre la charge, puis ajoute les sachets un par un 
         autant que nécessaire. À la fin, termine la charge pour imprimer toutes les étiquettes
         d'un coup.
       </p>
