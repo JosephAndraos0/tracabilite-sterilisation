@@ -7,6 +7,7 @@ import {
   deleteDoc,
   doc,
   runTransaction,
+  arrayUnion,
   query,
   orderBy,
 } from "firebase/firestore";
@@ -78,10 +79,10 @@ export default function App() {
     }
   }, []);
 
-  // Transaction: crée la charge ET incrémente le compteur de cycle du
-  // stérilisateur en une seule opération atomique, pour éviter que deux
-  // charges se retrouvent avec le même numéro de cycle.
-  const createCharge = useCallback(async (sterilizerId, sachetCount) => {
+  // Transaction: réserve le numéro de cycle du stérilisateur et crée la
+  // charge (encore vide) en une seule opération atomique, pour éviter que
+  // deux charges se retrouvent avec le même numéro de cycle.
+  const startCharge = useCallback(async (sterilizerId) => {
     const sterilizerRef = doc(db, "sterilisateurs", sterilizerId);
     const chargeRef = doc(collection(db, "charges"));
     const charge = await runTransaction(db, async (tx) => {
@@ -89,22 +90,29 @@ export default function App() {
       if (!sterSnap.exists()) throw new Error("Stérilisateur introuvable");
       const sterData = sterSnap.data();
       const cycleNumber = sterData.nextCycle;
-      const sachets = Array.from({ length: sachetCount }, (_, i) => ({
-        code: genSachetCode(),
-        index: i + 1,
-      }));
       const newCharge = {
         date: todayISO(),
         sterilizerId,
         sterilizerName: sterData.name,
         cycleNumber,
-        sachets,
+        sachets: [],
       };
       tx.set(chargeRef, newCharge);
       tx.update(sterilizerRef, { nextCycle: cycleNumber + 1 });
       return { id: chargeRef.id, ...newCharge };
     });
     return charge;
+  }, []);
+
+  // Ajoute un sachet à une charge déjà démarrée (un clic = un sachet imprimé).
+  const addSachet = useCallback(async (chargeId, sachet) => {
+    try {
+      await updateDoc(doc(db, "charges", chargeId), {
+        sachets: arrayUnion(sachet),
+      });
+    } catch {
+      setErr("Erreur en enregistrant le sachet.");
+    }
   }, []);
 
   const loading = !ready || sterilizers === null || charges === null;
@@ -152,7 +160,7 @@ export default function App() {
               onRemove={removeSterilizer}
             />
           ) : tab === "nouvelle" ? (
-            <NewChargePanel sterilizers={sterilizers} onCreateCharge={createCharge} />
+            <NewChargePanel sterilizers={sterilizers} onStartCharge={startCharge} onAddSachet={addSachet} />
           ) : (
             <ConsultPanel sterilizers={sterilizers} charges={charges} />
           )}
@@ -179,8 +187,8 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
       <h1 className="ts-h1">Stérilisateurs</h1>
       <p className="ts-lead">
         Ajoute chaque stérilisateur une seule fois. Le numéro de cycle de départ est celui
-        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système chaque 
-        nouvelle charge l'augmente de 1 automatiquement.
+        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système —
+        chaque nouvelle charge l'augmente de 1 automatiquement.
       </p>
 
       <div className="ts-card ts-form-row">
@@ -232,11 +240,11 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
 }
 
 /* ---------------- Nouvelle charge ---------------- */
-function NewChargePanel({ sterilizers, onCreateCharge }) {
+function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
   const [sterilizerId, setSterilizerId] = useState(sterilizers[0]?.id || "");
-  const [count, setCount] = useState(5);
-  const [lastCharge, setLastCharge] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [session, setSession] = useState(null);
+  const [sachets, setSachets] = useState([]);
+  const [busyStart, setBusyStart] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -245,18 +253,40 @@ function NewChargePanel({ sterilizers, onCreateCharge }) {
 
   const sterilizer = sterilizers.find((s) => s.id === sterilizerId);
 
-  const create = async () => {
-    if (!sterilizer || count < 1) return;
-    setBusy(true);
+  const start = async () => {
+    if (!sterilizer) return;
+    setBusyStart(true);
     setError("");
     try {
-      const charge = await onCreateCharge(sterilizer.id, parseInt(count, 10));
-      setLastCharge(charge);
+      const charge = await onStartCharge(sterilizer.id);
+      setSession(charge);
+      setSachets([]);
     } catch {
-      setError("Erreur en créant la charge. Réessaie.");
+      setError("Erreur en démarrant la charge. Réessaie.");
     } finally {
-      setBusy(false);
+      setBusyStart(false);
     }
+  };
+
+  const addOne = async () => {
+    if (!session) return;
+    setError("");
+    const sachet = { code: genSachetCode(), index: sachets.length + 1 };
+    setSachets((prev) => [...prev, sachet]);
+    try {
+      await onAddSachet(session.id, sachet);
+    } catch {
+      setError("Le sachet a été ajouté mais pas sauvegardé — vérifie ta connexion.");
+    }
+  };
+
+  const finishAndPrint = () => {
+    if (sachets.length > 0) {
+      window.print();
+    }
+    setSession(null);
+    setSachets([]);
+    setError("");
   };
 
   if (sterilizers.length === 0) {
@@ -274,81 +304,91 @@ function NewChargePanel({ sterilizers, onCreateCharge }) {
     <div>
       <h1 className="ts-h1">Nouvelle charge</h1>
       <p className="ts-lead">
-        La date et le numéro de cycle sont générés automatiquement. Choisis le
-        stérilisateur et le nombre de sachets dans le bundle.
+        Choisis le stérilisateur et démarre la charge, puis ajoute les sachets un par un —
+        autant que nécessaire. À la fin, termine la charge pour imprimer toutes les étiquettes
+        d'un coup.
       </p>
 
-      <div className="ts-card">
-        <div className="ts-form-row">
-          <div className="ts-field">
-            <label>Stérilisateur</label>
-            <select value={sterilizerId} onChange={(e) => setSterilizerId(e.target.value)}>
-              {sterilizers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="ts-field ts-field-narrow">
-            <label>Nombre de sachets</label>
-            <input type="number" min={1} value={count} onChange={(e) => setCount(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="ts-preview-strip">
-          <div>
-            <span className="ts-mono-label">Date</span>
-            <span className="ts-mono-val">{formatDateFR(todayISO())}</span>
-          </div>
-          <div>
-            <span className="ts-mono-label">Cycle</span>
-            <span className="ts-mono-val">{sterilizer ? sterilizer.nextCycle : "—"}</span>
-          </div>
-          <div>
-            <span className="ts-mono-label">Sachets</span>
-            <span className="ts-mono-val">{count || 0}</span>
-          </div>
-        </div>
-
-        {error && <div className="ts-error" style={{ marginTop: 14 }}>{error}</div>}
-
-        <button className="ts-btn ts-btn-primary ts-btn-wide" onClick={create} disabled={busy}>
-          {busy ? "Création…" : "Créer la charge et générer les étiquettes"}
-        </button>
-      </div>
-
-      {lastCharge && <LabelSheet charge={lastCharge} />}
-    </div>
-  );
-}
-
-function LabelSheet({ charge }) {
-  const print = () => window.print();
-
-  return (
-    <div className="ts-card ts-sheet">
-      <div className="ts-sheet-head">
-        <div>
-          <div className="ts-sheet-title">
-            Charge créée — Cycle {charge.cycleNumber} · {charge.sterilizerName}
-          </div>
-          <div className="ts-sheet-sub">{formatDateFR(charge.date)} · {charge.sachets.length} sachets</div>
-        </div>
-        <button className="ts-btn ts-btn-primary" onClick={print}>
-          Imprimer les étiquettes
-        </button>
-      </div>
-      <div className="ts-labels-grid" id="ts-printable">
-        {charge.sachets.map((s) => (
-          <div className="ts-label" key={s.code}>
-            <div className="ts-label-head">
-              {formatDateFR(charge.date)} &nbsp; {charge.sterilizerName} &nbsp; CYCLE {charge.cycleNumber}
+      {!session ? (
+        <div className="ts-card">
+          <div className="ts-form-row">
+            <div className="ts-field">
+              <label>Stérilisateur</label>
+              <select value={sterilizerId} onChange={(e) => setSterilizerId(e.target.value)}>
+                {sterilizers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="ts-label-num">{s.code}</div>
           </div>
-        ))}
-      </div>
+
+          <div className="ts-preview-strip">
+            <div>
+              <span className="ts-mono-label">Date</span>
+              <span className="ts-mono-val">{formatDateFR(todayISO())}</span>
+            </div>
+            <div>
+              <span className="ts-mono-label">Cycle</span>
+              <span className="ts-mono-val">{sterilizer ? sterilizer.nextCycle : "—"}</span>
+            </div>
+          </div>
+
+          {error && <div className="ts-error" style={{ marginTop: 14 }}>{error}</div>}
+
+          <button className="ts-btn ts-btn-primary ts-btn-wide" onClick={start} disabled={busyStart}>
+            {busyStart ? "Démarrage…" : "Démarrer la charge"}
+          </button>
+        </div>
+      ) : (
+        <div className="ts-card ts-sheet">
+          <div className="ts-sheet-head">
+            <div>
+              <div className="ts-sheet-title">
+                Cycle {session.cycleNumber} · {session.sterilizerName}
+              </div>
+              <div className="ts-sheet-sub">
+                {formatDateFR(session.date)} · {sachets.length} sachet(s) ajouté(s)
+              </div>
+            </div>
+          </div>
+
+          {error && <div className="ts-error" style={{ marginBottom: 14 }}>{error}</div>}
+
+          <div className="ts-print-actions">
+            <button className="ts-btn ts-btn-print" onClick={addOne}>
+              + Ajouter un sachet
+            </button>
+            <button className="ts-btn ts-btn-stop" onClick={finishAndPrint}>
+              Terminer et imprimer
+            </button>
+          </div>
+
+          {sachets.length > 0 && (
+            <div className="ts-sachet-grid" style={{ marginTop: 18 }}>
+              {sachets.map((s) => (
+                <div className="ts-sachet-chip" key={s.code}>
+                  {s.code}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Zone imprimable : toutes les étiquettes de la charge, imprimées d'un coup */}
+          <div className="ts-labels-grid" id="ts-printable" style={{ marginTop: sachets.length ? 18 : 0 }}>
+            {sachets.map((s) => (
+              <div className="ts-label" key={s.code}>
+                <div className="ts-label-head">
+                  {formatDateFR(session.date)} &nbsp; {session.sterilizerName} &nbsp; CYCLE{" "}
+                  {session.cycleNumber}
+                </div>
+                <div className="ts-label-num">{s.code}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -488,6 +528,12 @@ const css = `
 .ts-btn-primary:disabled { opacity: 0.6; cursor: default; }
 .ts-btn-ghost { background: none; color: #9B3B3B; border: 1px solid var(--line); }
 .ts-btn-wide { width: 100%; margin-top: 16px; padding: 12px; }
+.ts-print-actions { display: flex; gap: 12px; }
+.ts-btn-print { flex: 1; background: #1F7A4C; color: #fff; padding: 14px; font-size: 15px; }
+.ts-btn-print:hover { background: #24905A; }
+.ts-btn-print:disabled { opacity: 0.6; cursor: default; }
+.ts-btn-stop { flex: 1; background: #B23B3B; color: #fff; padding: 14px; font-size: 15px; }
+.ts-btn-stop:hover { background: #C94848; }
 
 .ts-preview-strip { display: flex; gap: 28px; margin-top: 18px; padding: 14px 16px; background: var(--surface-alt); border-radius: 8px; }
 .ts-mono-label { display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--steel); margin-bottom: 3px; }
