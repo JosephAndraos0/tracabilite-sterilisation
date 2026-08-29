@@ -9,7 +9,8 @@ import {
   runTransaction,
   arrayUnion,
   query,
-  orderBy,
+  where,
+  getDocs,
 } from "firebase/firestore";
 import { db, ensureAuth } from "./firebase.js";
 
@@ -25,7 +26,6 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("nouvelle");
   const [sterilizers, setSterilizers] = useState(null);
-  const [charges, setCharges] = useState(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -41,15 +41,7 @@ export default function App() {
       (snap) => setSterilizers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
       () => setErr("Erreur de lecture des stérilisateurs.")
     );
-    const unsubC = onSnapshot(
-      query(collection(db, "charges"), orderBy("date", "desc")),
-      (snap) => setCharges(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      () => setErr("Erreur de lecture des charges.")
-    );
-    return () => {
-      unsubS();
-      unsubC();
-    };
+    return () => unsubS();
   }, [ready]);
 
   const addSterilizer = useCallback(async (name, startCycle) => {
@@ -80,11 +72,12 @@ export default function App() {
   }, []);
 
   // Transaction: réserve le numéro de cycle du stérilisateur et crée la
-  // charge (encore vide) en une seule opération atomique, pour éviter que
-  // deux charges se retrouvent avec le même numéro de cycle.
+  // charge (encore vide) directement DANS la sous-collection de ce
+  // stérilisateur (sterilisateurs/{id}/charges) — chaque stérilisateur a
+  // ainsi sa propre base de charges, pas une liste globale partagée.
   const startCharge = useCallback(async (sterilizerId) => {
     const sterilizerRef = doc(db, "sterilisateurs", sterilizerId);
-    const chargeRef = doc(collection(db, "charges"));
+    const chargeRef = doc(collection(db, "sterilisateurs", sterilizerId, "charges"));
     const charge = await runTransaction(db, async (tx) => {
       const sterSnap = await tx.get(sterilizerRef);
       if (!sterSnap.exists()) throw new Error("Stérilisateur introuvable");
@@ -104,10 +97,11 @@ export default function App() {
     return charge;
   }, []);
 
-  // Ajoute un sachet à une charge déjà démarrée (un clic = un sachet imprimé).
-  const addSachet = useCallback(async (chargeId, sachet) => {
+  // Ajoute un sachet à une charge déjà démarrée, dans la sous-collection du
+  // stérilisateur concerné.
+  const addSachet = useCallback(async (sterilizerId, chargeId, sachet) => {
     try {
-      await updateDoc(doc(db, "charges", chargeId), {
+      await updateDoc(doc(db, "sterilisateurs", sterilizerId, "charges", chargeId), {
         sachets: arrayUnion(sachet),
       });
     } catch {
@@ -115,7 +109,27 @@ export default function App() {
     }
   }, []);
 
-  const loading = !ready || sterilizers === null || charges === null;
+  // Va chercher, pour une date donnée, les charges de CHAQUE stérilisateur
+  // (une requête par sous-collection) et les regroupe par stérilisateur.
+  const fetchChargesForDate = useCallback(
+    async (date) => {
+      const result = {};
+      await Promise.all(
+        (sterilizers || []).map(async (s) => {
+          const q = query(
+            collection(db, "sterilisateurs", s.id, "charges"),
+            where("date", "==", date)
+          );
+          const snap = await getDocs(q);
+          result[s.id] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        })
+      );
+      return result;
+    },
+    [sterilizers]
+  );
+
+  const loading = !ready || sterilizers === null;
 
   return (
     <div style={{ minHeight: "100%" }}>
@@ -162,7 +176,7 @@ export default function App() {
           ) : tab === "nouvelle" ? (
             <NewChargePanel sterilizers={sterilizers} onStartCharge={startCharge} onAddSachet={addSachet} />
           ) : (
-            <ConsultPanel sterilizers={sterilizers} charges={charges} />
+            <ConsultPanel sterilizers={sterilizers} fetchChargesForDate={fetchChargesForDate} />
           )}
         </main>
       </div>
@@ -187,7 +201,7 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
       <h1 className="ts-h1">Stérilisateurs</h1>
       <p className="ts-lead">
         Ajoute chaque stérilisateur une seule fois. Le numéro de cycle de départ est celui
-        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système 
+        où l'appareil est rendu au moment où tu commences à l'utiliser dans le système —
         chaque nouvelle charge l'augmente de 1 automatiquement.
       </p>
 
@@ -274,7 +288,7 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
     const sachet = { code: genSachetCode(), index: sachets.length + 1 };
     setSachets((prev) => [...prev, sachet]);
     try {
-      await onAddSachet(session.id, sachet);
+      await onAddSachet(session.sterilizerId, session.id, sachet);
     } catch {
       setError("Le sachet a été ajouté mais pas sauvegardé — vérifie ta connexion.");
     }
@@ -304,7 +318,7 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
     <div>
       <h1 className="ts-h1">Nouvelle charge</h1>
       <p className="ts-lead">
-        Choisis le stérilisateur et démarre la charge, puis ajoute les sachets un par un 
+        Choisis le stérilisateur et démarre la charge, puis ajoute les sachets un par un —
         autant que nécessaire. À la fin, termine la charge pour imprimer toutes les étiquettes
         d'un coup.
       </p>
@@ -394,23 +408,44 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
 }
 
 /* ---------------- Consulter ---------------- */
-function ConsultPanel({ sterilizers, charges }) {
+function ConsultPanel({ sterilizers, fetchChargesForDate }) {
   const [date, setDate] = useState(todayISO());
+  const [loading, setLoading] = useState(true);
+  const [chargesBySterilizer, setChargesBySterilizer] = useState({});
   const [openSterilizer, setOpenSterilizer] = useState(null);
   const [openCharge, setOpenCharge] = useState(null);
+  const [error, setError] = useState("");
 
-  const dayCharges = charges.filter((c) => c.date === date);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetchChargesForDate(date)
+      .then((result) => {
+        if (!cancelled) setChargesBySterilizer(result);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Erreur en chargeant les charges de cette date.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [date, fetchChargesForDate]);
+
   const bySterilizer = sterilizers
-    .map((s) => ({
-      sterilizer: s,
-      charges: dayCharges.filter((c) => c.sterilizerId === s.id),
-    }))
+    .map((s) => ({ sterilizer: s, charges: chargesBySterilizer[s.id] || [] }))
     .filter((g) => g.charges.length > 0);
 
   return (
     <div>
       <h1 className="ts-h1">Consulter</h1>
-      <p className="ts-lead">Choisis une date pour voir les stérilisateurs utilisés et leurs charges.</p>
+      <p className="ts-lead">
+        Choisis une date pour voir les stérilisateurs utilisés et leurs charges. Chaque
+        stérilisateur garde sa propre base de charges.
+      </p>
 
       <div className="ts-card ts-form-row">
         <div className="ts-field ts-field-narrow">
@@ -427,7 +462,11 @@ function ConsultPanel({ sterilizers, charges }) {
         </div>
       </div>
 
-      {bySterilizer.length === 0 ? (
+      {error && <div className="ts-error">{error}</div>}
+
+      {loading ? (
+        <div className="ts-loading">Chargement…</div>
+      ) : bySterilizer.length === 0 ? (
         <div className="ts-empty">Aucune charge enregistrée pour le {formatDateFR(date)}.</div>
       ) : (
         <div className="ts-list">
