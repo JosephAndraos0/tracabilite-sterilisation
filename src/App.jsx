@@ -10,6 +10,7 @@ import {
   arrayUnion,
   query,
   where,
+  orderBy,
   getDocs,
 } from "firebase/firestore";
 import { db, ensureAuth } from "./firebase.js";
@@ -129,6 +130,17 @@ export default function App() {
     [sterilizers]
   );
 
+  // Va chercher TOUT l'historique des charges d'UN SEUL stérilisateur
+  // (toute sa sous-collection, triée du cycle le plus récent au plus ancien).
+  const fetchHistoryForSterilizer = useCallback(async (sterilizerId) => {
+    const q = query(
+      collection(db, "sterilisateurs", sterilizerId, "charges"),
+      orderBy("cycleNumber", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }, []);
+
   const loading = !ready || sterilizers === null;
 
   return (
@@ -158,6 +170,9 @@ export default function App() {
             <button className={tab === "sterilisateurs" ? "active" : ""} onClick={() => setTab("sterilisateurs")}>
               <span className="ts-nav-num">03</span> Stérilisateurs
             </button>
+            <button className={tab === "bases" ? "active" : ""} onClick={() => setTab("bases")}>
+              <span className="ts-nav-num">04</span> Bases de données
+            </button>
           </nav>
           <div className="ts-side-foot">Connecté à Firebase — données partagées en temps réel</div>
         </aside>
@@ -175,8 +190,10 @@ export default function App() {
             />
           ) : tab === "nouvelle" ? (
             <NewChargePanel sterilizers={sterilizers} onStartCharge={startCharge} onAddSachet={addSachet} />
-          ) : (
+          ) : tab === "consulter" ? (
             <ConsultPanel sterilizers={sterilizers} fetchChargesForDate={fetchChargesForDate} />
+          ) : (
+            <DatabasesPanel sterilizers={sterilizers} fetchHistoryForSterilizer={fetchHistoryForSterilizer} />
           )}
         </main>
       </div>
@@ -510,6 +527,97 @@ function ConsultPanel({ sterilizers, fetchChargesForDate }) {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Bases de données (historique par stérilisateur) ---------------- */
+function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [openCharge, setOpenCharge] = useState(null);
+
+  const select = (id) => {
+    if (selectedId === id) {
+      setSelectedId(null);
+      setHistory([]);
+      setOpenCharge(null);
+      return;
+    }
+    setSelectedId(id);
+    setOpenCharge(null);
+    setLoading(true);
+    setError("");
+    fetchHistoryForSterilizer(id)
+      .then((result) => setHistory(result))
+      .catch(() => setError("Erreur en chargeant l'historique."))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <div>
+      <h1 className="ts-h1">Bases de données</h1>
+      <p className="ts-lead">
+        Clique sur un stérilisateur pour voir tout son historique de charges, du plus récent au
+        plus ancien — pas besoin d'aller dans Firebase.
+      </p>
+
+      {sterilizers.length === 0 ? (
+        <div className="ts-empty">Aucun stérilisateur configuré pour l'instant.</div>
+      ) : (
+        <div className="ts-list">
+          {sterilizers.map((s) => (
+            <div key={s.id}>
+              <div className="ts-list-item ts-clickable" onClick={() => select(s.id)}>
+                <div className="ts-list-item-main">
+                  <div className="ts-list-item-title">{s.name}</div>
+                  <div className="ts-list-item-sub">Prochain cycle : {s.nextCycle}</div>
+                </div>
+                <span className="ts-chevron">{selectedId === s.id ? "−" : "+"}</span>
+              </div>
+
+              {selectedId === s.id && (
+                <div className="ts-sublist">
+                  {error && <div className="ts-error">{error}</div>}
+                  {loading ? (
+                    <div className="ts-loading">Chargement…</div>
+                  ) : history.length === 0 ? (
+                    <div className="ts-empty">Aucune charge enregistrée pour ce stérilisateur.</div>
+                  ) : (
+                    history.map((c) => (
+                      <div key={c.id}>
+                        <div
+                          className="ts-list-item ts-clickable ts-sub-item"
+                          onClick={() => setOpenCharge(openCharge === c.id ? null : c.id)}
+                        >
+                          <div className="ts-list-item-main">
+                            <div className="ts-list-item-title">Cycle {c.cycleNumber}</div>
+                            <div className="ts-list-item-sub">
+                              {formatDateFR(c.date)} · {c.sachets.length} sachets
+                            </div>
+                          </div>
+                          <span className="ts-chevron">{openCharge === c.id ? "−" : "+"}</span>
+                        </div>
+                        {openCharge === c.id && (
+                          <div className="ts-sachet-grid">
+                            {c.sachets.map((sc) => (
+                              <div className="ts-sachet-chip" key={sc.code}>
+                                {sc.code}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
