@@ -710,9 +710,25 @@ const css = `
 .ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
 
 @media print {
+  @page { size: 2in 1in; margin: 0; }
   body * { visibility: hidden; }
   #ts-printable, #ts-printable * { visibility: visible; }
-  #ts-printable { position: absolute; top: 0; left: 0; width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
-  .ts-label { border: 1px solid #000; box-shadow: none; }
+  #ts-printable { position: absolute; top: 0; left: 0; }
+  #ts-printable .ts-label {
+    width: 2in;
+    height: 1in;
+    box-sizing: border-box;
+    border: none;
+    padding: 0.08in 0.12in;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+    break-after: page;
+  }
+  #ts-printable .ts-label:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
 }
 `;
