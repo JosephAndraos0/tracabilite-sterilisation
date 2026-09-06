@@ -544,6 +544,19 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openCharge, setOpenCharge] = useState(null);
+  const [printCharge, setPrintCharge] = useState(null);
+
+  useEffect(() => {
+    if (printCharge) {
+      window.print();
+      setPrintCharge(null);
+    }
+  }, [printCharge]);
+
+  const reprint = (c, e) => {
+    e.stopPropagation();
+    setPrintCharge(c);
+  };
 
   const select = (id) => {
     if (selectedId === id) {
@@ -604,6 +617,9 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
                               {formatDateFR(c.date)} · {c.sachets.length} sachets
                             </div>
                           </div>
+                          <button className="ts-btn ts-btn-reprint" onClick={(e) => reprint(c, e)}>
+                            Réimprimer
+                          </button>
                           <span className="ts-chevron">{openCharge === c.id ? "−" : "+"}</span>
                         </div>
                         {openCharge === c.id && (
@@ -620,6 +636,21 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
                   )}
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Zone imprimable hors écran : réimpression d'une charge existante */}
+      {printCharge && (
+        <div className="ts-labels-grid ts-print-offscreen" id="ts-printable">
+          {printCharge.sachets.map((s) => (
+            <div className="ts-label" key={s.code}>
+              <div className="ts-label-head">
+                {formatDateFR(printCharge.date)} &nbsp; {printCharge.sterilizerName} &nbsp; CYCLE{" "}
+                {printCharge.cycleNumber}
+              </div>
+              <div className="ts-label-num">{s.code}</div>
             </div>
           ))}
         </div>
@@ -680,6 +711,9 @@ const css = `
 .ts-btn-print:hover { background: #24905A; }
 .ts-btn-print:disabled { opacity: 0.6; cursor: default; }
 .ts-btn-stop { flex: 1; background: #B23B3B; color: #fff; padding: 14px; font-size: 15px; }
+.ts-btn-reprint { background: #fff; color: var(--teal-deep); border: 1px solid var(--line); padding: 7px 12px; font-size: 12px; white-space: nowrap; }
+.ts-btn-reprint:hover { background: var(--surface-alt); }
+.ts-print-offscreen { position: absolute; left: -9999px; top: -9999px; }
 .ts-btn-stop:hover { background: #C94848; }
 
 .ts-preview-strip { display: flex; gap: 28px; margin-top: 18px; padding: 14px 16px; background: var(--surface-alt); border-radius: 8px; }
