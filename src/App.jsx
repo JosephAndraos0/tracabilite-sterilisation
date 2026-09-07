@@ -757,12 +757,12 @@ const css = `
     height: 1in;
     box-sizing: border-box;
     border: none;
-    padding: 0.06in 0.15in;
+    padding: 0.03in 0.12in;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: flex-start;
-    gap: 0.07in;
+    gap: 0.03in;
     page-break-after: always;
     break-after: page;
   }
@@ -771,13 +771,13 @@ const css = `
     break-after: auto;
   }
   #ts-printable .ts-label-head {
-    font-size: 15px;
-    line-height: 1.3;
+    font-size: 20px;
+    line-height: 1.1;
     white-space: nowrap;
   }
   #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 32px;
+    font-size: 42px;
     align-self: center;
   }
 }
