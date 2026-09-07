@@ -771,13 +771,13 @@ const css = `
     break-after: auto;
   }
   #ts-printable .ts-label-head {
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.3;
     white-space: nowrap;
   }
   #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 30px;
+    font-size: 32px;
     align-self: center;
   }
 }
