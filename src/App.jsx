@@ -740,8 +740,8 @@ const css = `
 .ts-sheet-sub { font-size: 12px; color: var(--steel); margin-top: 2px; }
 .ts-labels-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .ts-label { width: 192px; aspect-ratio: 2 / 1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; background: #fff; }
-.ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: var(--ink); line-height: 1.3; }
-.ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
+.ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 25px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
 
 @media print {
   @page { size: 2in 1in; margin: 0; }
