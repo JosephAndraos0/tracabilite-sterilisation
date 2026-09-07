@@ -753,10 +753,11 @@ const css = `
     height: 1in;
     box-sizing: border-box;
     border: none;
-    padding: 0.08in 0.12in;
+    padding: 0.1in 0.15in;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 0.18in;
     page-break-after: always;
     break-after: page;
   }
