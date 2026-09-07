@@ -411,8 +411,10 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
             {sachets.map((s) => (
               <div className="ts-label" key={s.code}>
                 <div className="ts-label-head">
-                  {formatDateFR(session.date)} &nbsp; {session.sterilizerName} &nbsp; CYCLE{" "}
-                  {session.cycleNumber}
+                  <div>{formatDateFR(session.date)}</div>
+                  <div>
+                    {session.sterilizerName} &nbsp; CYCLE {session.cycleNumber}
+                  </div>
                 </div>
                 <div className="ts-label-num">{s.code}</div>
               </div>
@@ -647,8 +649,10 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
           {printCharge.sachets.map((s) => (
             <div className="ts-label" key={s.code}>
               <div className="ts-label-head">
-                {formatDateFR(printCharge.date)} &nbsp; {printCharge.sterilizerName} &nbsp; CYCLE{" "}
-                {printCharge.cycleNumber}
+                <div>{formatDateFR(printCharge.date)}</div>
+                <div>
+                  {printCharge.sterilizerName} &nbsp; CYCLE {printCharge.cycleNumber}
+                </div>
               </div>
               <div className="ts-label-num">{s.code}</div>
             </div>
@@ -744,21 +748,21 @@ const css = `
 .ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 25px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
 
 @media print {
-  @page { margin: 0; }
-  html, body { height: 100%; }
+  @page { size: 2in 1in; margin: 0; }
   body * { visibility: hidden; }
   #ts-printable, #ts-printable * { visibility: visible; }
-  #ts-printable { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #ts-printable { position: absolute; top: 0; left: 0; }
   #ts-printable .ts-label {
-    width: 100%;
-    height: 100%;
+    width: 2in;
+    height: 1in;
     box-sizing: border-box;
     border: none;
-    padding: 6% 8%;
+    padding: 0.06in 0.15in;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 8%;
+    align-items: flex-start;
+    gap: 0.07in;
     page-break-after: always;
     break-after: page;
   }
@@ -767,11 +771,14 @@ const css = `
     break-after: auto;
   }
   #ts-printable .ts-label-head {
-    font-size: 26px;
+    font-size: 12px;
+    line-height: 1.25;
     white-space: nowrap;
   }
+  #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 64px;
+    font-size: 24px;
+    align-self: center;
   }
 }
 `;
