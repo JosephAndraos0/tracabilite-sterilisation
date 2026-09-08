@@ -15,6 +15,22 @@ import {
 } from "firebase/firestore";
 import { db, ensureAuth } from "./firebase.js";
 
+// Comptes autorisés à ouvrir l'application. Le contrôle se fait côté navigateur
+// (l'appli n'a pas de serveur à elle) : ça empêche l'accès occasionnel, mais ce
+// n'est pas une barrière de sécurité forte — quelqu'un de technique peut lire
+// ces valeurs dans le code. Pour une vraie protection il faudrait Firebase Auth.
+const AUTHORIZED_USERS = ["STJ", "STH", "SADP", "ASSO", "MSC", "SJSR", "SJSRG"];
+const SHARED_PASSWORD = "11520";
+const AUTH_KEY = "ts-auth";
+
+const readAuthUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_KEY))?.user || null;
+  } catch {
+    return null;
+  }
+};
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const formatDateFR = (iso) => {
   const [y, m, d] = iso.split("-");
@@ -23,11 +39,40 @@ const formatDateFR = (iso) => {
 const genSachetCode = () =>
   "#" + Math.floor(1000000 + Math.random() * 9000000).toString();
 
+// Déclenche le téléchargement d'un fichier généré côté navigateur.
+function downloadFile(content, mime, filename) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Échappe une valeur pour une cellule CSV (séparateur point-virgule, format FR).
+function csvCell(value) {
+  const s = String(value ?? "");
+  return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
 export default function App() {
+  const [authUser, setAuthUser] = useState(readAuthUser);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("nouvelle");
   const [sterilizers, setSterilizers] = useState(null);
   const [err, setErr] = useState("");
+
+  const logout = useCallback(() => {
+    try {
+      localStorage.removeItem(AUTH_KEY);
+    } catch {
+      /* ignore */
+    }
+    setAuthUser(null);
+  }, []);
 
   useEffect(() => {
     ensureAuth()
@@ -143,6 +188,15 @@ export default function App() {
 
   const loading = !ready || sterilizers === null;
 
+  if (!authUser) {
+    return (
+      <div style={{ minHeight: "100%" }}>
+        <style>{css}</style>
+        <LoginScreen onLogin={setAuthUser} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100%" }}>
       <style>{css}</style>
@@ -174,7 +228,19 @@ export default function App() {
               <span className="ts-nav-num">04</span> Bases de données
             </button>
           </nav>
-          <div className="ts-side-foot">Connecté à Firebase — données partagées en temps réel</div>
+          <div className="ts-side-foot">
+            <div className="ts-user-row">
+              <span>
+                Connecté : <strong>{authUser}</strong>
+              </span>
+              <button className="ts-logout" onClick={logout}>
+                Déconnexion
+              </button>
+            </div>
+            <div className="ts-side-foot-note">
+              Données partagées en temps réel via Firebase
+            </div>
+          </div>
         </aside>
 
         <main className="ts-main">
@@ -547,6 +613,8 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
   const [error, setError] = useState("");
   const [openCharge, setOpenCharge] = useState(null);
   const [printCharge, setPrintCharge] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState("");
 
   useEffect(() => {
     if (printCharge) {
@@ -554,6 +622,62 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
       setPrintCharge(null);
     }
   }, [printCharge]);
+
+  // Récupère TOUTE la base (chaque stérilisateur + tout son historique de
+  // charges) et la télécharge, soit en CSV lisible (preuve des stérilisations),
+  // soit en JSON complet (sauvegarde intégrale).
+  const exportDatabase = async (format) => {
+    setExporting(true);
+    setExportErr("");
+    try {
+      const full = [];
+      for (const s of sterilizers) {
+        const charges = await fetchHistoryForSterilizer(s.id);
+        full.push({ id: s.id, name: s.name, nextCycle: s.nextCycle, charges });
+      }
+      const stamp = todayISO();
+
+      if (format === "json") {
+        downloadFile(
+          JSON.stringify(
+            { exportedAt: new Date().toISOString(), sterilisateurs: full },
+            null,
+            2
+          ),
+          "application/json",
+          `base-sterilisation-${stamp}.json`
+        );
+      } else {
+        const rows = [
+          ["Stérilisateur", "Date", "Cycle", "Nombre de sachets", "Codes des sachets"],
+        ];
+        full.forEach((s) => {
+          if (s.charges.length === 0) {
+            rows.push([s.name, "", "", "0", ""]);
+            return;
+          }
+          s.charges.forEach((c) => {
+            rows.push([
+              s.name,
+              formatDateFR(c.date),
+              c.cycleNumber,
+              c.sachets.length,
+              c.sachets.map((x) => x.code).join(" "),
+            ]);
+          });
+        });
+        // BOM UTF-8 : sans lui, Excel affiche mal les accents des en-têtes.
+        const bom = String.fromCharCode(0xfeff);
+        const csv =
+          bom + rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
+        downloadFile(csv, "text/csv;charset=utf-8", `base-sterilisation-${stamp}.csv`);
+      }
+    } catch {
+      setExportErr("Erreur pendant l'export. Vérifie ta connexion et réessaie.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const reprint = (c, e) => {
     e.stopPropagation();
@@ -584,6 +708,34 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
         Clique sur un stérilisateur pour voir tout son historique de charges, du plus récent au
         plus ancien — pas besoin d'aller dans Firebase.
       </p>
+
+      <div className="ts-card ts-export-card">
+        <div>
+          <div className="ts-export-title">Télécharger toute la base de données</div>
+          <div className="ts-export-sub">
+            Exporte tous les stérilisateurs et l'intégralité de leurs charges. Le fichier
+            Excel/CSV sert de preuve des stérilisations effectuées ; le fichier JSON est une
+            sauvegarde complète et fidèle des données.
+          </div>
+        </div>
+        <div className="ts-export-actions">
+          <button
+            className="ts-btn ts-btn-primary"
+            onClick={() => exportDatabase("csv")}
+            disabled={exporting || sterilizers.length === 0}
+          >
+            {exporting ? "Export en cours…" : "Télécharger (Excel / CSV)"}
+          </button>
+          <button
+            className="ts-btn ts-btn-ghost-teal"
+            onClick={() => exportDatabase("json")}
+            disabled={exporting || sterilizers.length === 0}
+          >
+            Sauvegarde complète (JSON)
+          </button>
+        </div>
+        {exportErr && <div className="ts-error" style={{ marginTop: 4 }}>{exportErr}</div>}
+      </div>
 
       {sterilizers.length === 0 ? (
         <div className="ts-empty">Aucun stérilisateur configuré pour l'instant.</div>
@@ -659,6 +811,92 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Écran de connexion ---------------- */
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    const match = AUTHORIZED_USERS.find(
+      (u) => u.toLowerCase() === username.trim().toLowerCase()
+    );
+    if (match && password === SHARED_PASSWORD) {
+      try {
+        localStorage.setItem(AUTH_KEY, JSON.stringify({ user: match, ts: Date.now() }));
+      } catch {
+        /* ignore */
+      }
+      onLogin(match);
+    } else {
+      setError("Identifiant ou mot de passe incorrect.");
+    }
+  };
+
+  return (
+    <div className="ts-login">
+      <div className="ts-login-panel">
+        <div className="ts-login-brand">
+          <div className="ts-login-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" width="30" height="30">
+              <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" />
+              <path d="M20 8 L20 20 L28 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div>
+            <div className="ts-login-title">Traçabilité</div>
+            <div className="ts-login-sub">Stérilisation</div>
+          </div>
+        </div>
+
+        <form className="ts-login-form" onSubmit={submit}>
+          <div className="ts-login-lead">
+            Connectez-vous avec votre identifiant pour accéder au système.
+          </div>
+
+          <div className="ts-field">
+            <label>Identifiant</label>
+            <input
+              autoFocus
+              autoComplete="username"
+              autoCapitalize="characters"
+              spellCheck="false"
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError("");
+              }}
+              placeholder="Ex. STJ"
+            />
+          </div>
+
+          <div className="ts-field">
+            <label>Mot de passe</label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError("");
+              }}
+              placeholder="••••••"
+            />
+          </div>
+
+          {error && <div className="ts-login-error">{error}</div>}
+
+          <button type="submit" className="ts-btn ts-btn-primary ts-btn-wide">
+            Se connecter
+          </button>
+        </form>
+      </div>
+      <div className="ts-login-footnote">Accès réservé au personnel autorisé</div>
     </div>
   );
 }
@@ -746,6 +984,34 @@ const css = `
 .ts-label { width: 192px; aspect-ratio: 2 / 1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; background: #fff; }
 .ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.3; }
 .ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 25px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
+
+/* Connexion */
+.ts-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: linear-gradient(160deg, #0F3D3D 0%, #17514F 55%, #1F5C5C 100%); font-family: 'Inter', sans-serif; box-sizing: border-box; }
+.ts-login-panel { width: 100%; max-width: 380px; background: #fff; border-radius: 14px; padding: 34px 30px 30px; box-shadow: 0 24px 64px rgba(0,0,0,0.30); box-sizing: border-box; }
+.ts-login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.ts-login-mark { color: var(--teal-mid); display: flex; }
+.ts-login-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 20px; color: var(--ink); letter-spacing: -0.01em; line-height: 1.1; }
+.ts-login-sub { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--steel); margin-top: 2px; }
+.ts-login-form { display: flex; flex-direction: column; gap: 14px; }
+.ts-login-lead { font-size: 13px; color: var(--steel); line-height: 1.5; }
+.ts-login-error { background: #FBEAEA; color: #9B3B3B; padding: 9px 12px; border-radius: 6px; font-size: 12.5px; }
+.ts-login-footnote { font-size: 12px; color: rgba(255,255,255,0.62); letter-spacing: 0.03em; }
+
+/* Pied de menu : utilisateur connecté + déconnexion */
+.ts-user-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ts-user-row strong { color: #EAF0EE; font-weight: 600; }
+.ts-logout { background: none; border: 1px solid rgba(255,255,255,0.22); color: #C7DCDA; font-size: 11px; padding: 4px 9px; border-radius: 5px; cursor: pointer; font-family: 'Inter', sans-serif; flex-shrink: 0; }
+.ts-logout:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.ts-side-foot-note { font-size: 11px; color: #6C9391; line-height: 1.5; }
+
+/* Carte d'export de la base */
+.ts-export-card { display: flex; flex-direction: column; gap: 14px; }
+.ts-export-title { font-weight: 700; font-size: 15px; font-family: 'Space Grotesk', sans-serif; }
+.ts-export-sub { font-size: 12.5px; color: var(--steel); margin-top: 4px; line-height: 1.55; max-width: 520px; }
+.ts-export-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ts-btn-ghost-teal { background: #fff; color: var(--teal-deep); border: 1px solid var(--line); }
+.ts-btn-ghost-teal:hover { background: var(--surface-alt); }
+.ts-btn:disabled { opacity: 0.55; cursor: default; }
 
 @media print {
   @page { size: 2in 1in; margin: 0; }
