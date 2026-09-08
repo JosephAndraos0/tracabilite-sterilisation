@@ -55,7 +55,8 @@ Une fois déployé, ouvre le lien sur la tablette et ajoute-le à l'écran d'acc
 
 ## Notes
 
-- L'app se connecte en mode anonyme automatiquement (pas d'écran de login) — normal pour un appareil partagé.
+- L'app a un écran de connexion : chaque identifiant (STJ, STH, SADP, ASSO, MSC, SJSR, SJSRG) ouvre **sa propre base isolée** sous `sites/{identifiant}/…` — un site ne voit jamais les données d'un autre. La session est mémorisée par appareil (localStorage) ; bouton « Déconnexion » dans le menu. Le contrôle est côté navigateur (pas de vraie barrière de sécurité) ; sous le capot l'app reste connectée à Firebase en mode anonyme.
+- Onglet « Bases de données » : bouton pour télécharger toute la base du site connecté en CSV (preuve des stérilisations) ou en JSON (sauvegarde complète).
 - Les données sont partagées en temps réel : si jamais tu ouvres l'app sur deux appareils, elles restent synchronisées.
 - La création d'une charge est une transaction atomique : le numéro de cycle du stérilisateur et l'enregistrement de la charge se font ensemble, donc pas de risque de doublons de numéro de cycle.
 - Prochaine étape possible (pas incluse pour l'instant, comme discuté) : marquer quand/où chaque sachet est utilisé — le modèle de données peut être étendu pour ça plus tard sans tout refaire.

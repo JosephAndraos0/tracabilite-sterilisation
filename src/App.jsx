@@ -71,8 +71,22 @@ export default function App() {
     } catch {
       /* ignore */
     }
+    setSterilizers(null);
     setAuthUser(null);
   }, []);
+
+  // Chaque identifiant (STJ, ASSO, …) a sa PROPRE base, complètement isolée
+  // sous sites/{identifiant}/… — un site ne voit jamais les stérilisateurs ni
+  // les charges d'un autre. Tous les accès Firestore passent par ces deux
+  // helpers pour rester dans le bon site.
+  const siteCol = useCallback(
+    (...segments) => collection(db, "sites", authUser, ...segments),
+    [authUser]
+  );
+  const siteDoc = useCallback(
+    (...segments) => doc(db, "sites", authUser, ...segments),
+    [authUser]
+  );
 
   useEffect(() => {
     ensureAuth()
@@ -81,79 +95,96 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !authUser) return;
+    setSterilizers(null);
     const unsubS = onSnapshot(
-      collection(db, "sterilisateurs"),
+      siteCol("sterilisateurs"),
       (snap) => setSterilizers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
       () => setErr("Erreur de lecture des stérilisateurs.")
     );
     return () => unsubS();
-  }, [ready]);
+  }, [ready, authUser, siteCol]);
 
-  const addSterilizer = useCallback(async (name, startCycle) => {
-    try {
-      await addDoc(collection(db, "sterilisateurs"), {
-        name,
-        nextCycle: startCycle,
-      });
-    } catch {
-      setErr("Erreur en ajoutant le stérilisateur.");
-    }
-  }, []);
+  const addSterilizer = useCallback(
+    async (name, startCycle) => {
+      try {
+        await addDoc(siteCol("sterilisateurs"), {
+          name,
+          nextCycle: startCycle,
+        });
+      } catch {
+        setErr("Erreur en ajoutant le stérilisateur.");
+      }
+    },
+    [siteCol]
+  );
 
-  const updateSterilizerCycle = useCallback(async (id, nextCycle) => {
-    try {
-      await updateDoc(doc(db, "sterilisateurs", id), { nextCycle });
-    } catch {
-      setErr("Erreur en mettant à jour le cycle.");
-    }
-  }, []);
+  const updateSterilizerCycle = useCallback(
+    async (id, nextCycle) => {
+      try {
+        await updateDoc(siteDoc("sterilisateurs", id), { nextCycle });
+      } catch {
+        setErr("Erreur en mettant à jour le cycle.");
+      }
+    },
+    [siteDoc]
+  );
 
-  const removeSterilizer = useCallback(async (id) => {
-    try {
-      await deleteDoc(doc(db, "sterilisateurs", id));
-    } catch {
-      setErr("Erreur en retirant le stérilisateur.");
-    }
-  }, []);
+  const removeSterilizer = useCallback(
+    async (id) => {
+      try {
+        await deleteDoc(siteDoc("sterilisateurs", id));
+      } catch {
+        setErr("Erreur en retirant le stérilisateur.");
+      }
+    },
+    [siteDoc]
+  );
 
   // Transaction: réserve le numéro de cycle du stérilisateur et crée la
   // charge (encore vide) directement DANS la sous-collection de ce
-  // stérilisateur (sterilisateurs/{id}/charges) — chaque stérilisateur a
-  // ainsi sa propre base de charges, pas une liste globale partagée.
-  const startCharge = useCallback(async (sterilizerId) => {
-    const sterilizerRef = doc(db, "sterilisateurs", sterilizerId);
-    const chargeRef = doc(collection(db, "sterilisateurs", sterilizerId, "charges"));
-    const charge = await runTransaction(db, async (tx) => {
-      const sterSnap = await tx.get(sterilizerRef);
-      if (!sterSnap.exists()) throw new Error("Stérilisateur introuvable");
-      const sterData = sterSnap.data();
-      const cycleNumber = sterData.nextCycle;
-      const newCharge = {
-        date: todayISO(),
-        sterilizerId,
-        sterilizerName: sterData.name,
-        cycleNumber,
-        sachets: [],
-      };
-      tx.set(chargeRef, newCharge);
-      tx.update(sterilizerRef, { nextCycle: cycleNumber + 1 });
-      return { id: chargeRef.id, ...newCharge };
-    });
-    return charge;
-  }, []);
+  // stérilisateur (sites/{id}/sterilisateurs/{id}/charges) — chaque
+  // stérilisateur a ainsi sa propre base de charges, pas une liste partagée.
+  const startCharge = useCallback(
+    async (sterilizerId) => {
+      const sterilizerRef = siteDoc("sterilisateurs", sterilizerId);
+      const chargeRef = doc(siteCol("sterilisateurs", sterilizerId, "charges"));
+      const charge = await runTransaction(db, async (tx) => {
+        const sterSnap = await tx.get(sterilizerRef);
+        if (!sterSnap.exists()) throw new Error("Stérilisateur introuvable");
+        const sterData = sterSnap.data();
+        const cycleNumber = sterData.nextCycle;
+        const newCharge = {
+          date: todayISO(),
+          sterilizerId,
+          sterilizerName: sterData.name,
+          cycleNumber,
+          sachets: [],
+        };
+        tx.set(chargeRef, newCharge);
+        tx.update(sterilizerRef, { nextCycle: cycleNumber + 1 });
+        return { id: chargeRef.id, ...newCharge };
+      });
+      return charge;
+    },
+    [siteCol, siteDoc]
+  );
 
   // Ajoute un sachet à une charge déjà démarrée, dans la sous-collection du
   // stérilisateur concerné.
-  const addSachet = useCallback(async (sterilizerId, chargeId, sachet) => {
-    try {
-      await updateDoc(doc(db, "sterilisateurs", sterilizerId, "charges", chargeId), {
-        sachets: arrayUnion(sachet),
-      });
-    } catch {
-      setErr("Erreur en enregistrant le sachet.");
-    }
-  }, []);
+  const addSachet = useCallback(
+    async (sterilizerId, chargeId, sachet) => {
+      try {
+        await updateDoc(
+          siteDoc("sterilisateurs", sterilizerId, "charges", chargeId),
+          { sachets: arrayUnion(sachet) }
+        );
+      } catch {
+        setErr("Erreur en enregistrant le sachet.");
+      }
+    },
+    [siteDoc]
+  );
 
   // Va chercher, pour une date donnée, les charges de CHAQUE stérilisateur
   // (une requête par sous-collection) et les regroupe par stérilisateur.
@@ -163,7 +194,7 @@ export default function App() {
       await Promise.all(
         (sterilizers || []).map(async (s) => {
           const q = query(
-            collection(db, "sterilisateurs", s.id, "charges"),
+            siteCol("sterilisateurs", s.id, "charges"),
             where("date", "==", date)
           );
           const snap = await getDocs(q);
@@ -172,19 +203,22 @@ export default function App() {
       );
       return result;
     },
-    [sterilizers]
+    [sterilizers, siteCol]
   );
 
   // Va chercher TOUT l'historique des charges d'UN SEUL stérilisateur
   // (toute sa sous-collection, triée du cycle le plus récent au plus ancien).
-  const fetchHistoryForSterilizer = useCallback(async (sterilizerId) => {
-    const q = query(
-      collection(db, "sterilisateurs", sterilizerId, "charges"),
-      orderBy("cycleNumber", "desc")
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  }, []);
+  const fetchHistoryForSterilizer = useCallback(
+    async (sterilizerId) => {
+      const q = query(
+        siteCol("sterilisateurs", sterilizerId, "charges"),
+        orderBy("cycleNumber", "desc")
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    },
+    [siteCol]
+  );
 
   const loading = !ready || sterilizers === null;
 
@@ -259,7 +293,11 @@ export default function App() {
           ) : tab === "consulter" ? (
             <ConsultPanel sterilizers={sterilizers} fetchChargesForDate={fetchChargesForDate} />
           ) : (
-            <DatabasesPanel sterilizers={sterilizers} fetchHistoryForSterilizer={fetchHistoryForSterilizer} />
+            <DatabasesPanel
+              site={authUser}
+              sterilizers={sterilizers}
+              fetchHistoryForSterilizer={fetchHistoryForSterilizer}
+            />
           )}
         </main>
       </div>
@@ -606,7 +644,7 @@ function ConsultPanel({ sterilizers, fetchChargesForDate }) {
 }
 
 /* ---------------- Bases de données (historique par stérilisateur) ---------------- */
-function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
+function DatabasesPanel({ site, sterilizers, fetchHistoryForSterilizer }) {
   const [selectedId, setSelectedId] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -640,24 +678,25 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
       if (format === "json") {
         downloadFile(
           JSON.stringify(
-            { exportedAt: new Date().toISOString(), sterilisateurs: full },
+            { site, exportedAt: new Date().toISOString(), sterilisateurs: full },
             null,
             2
           ),
           "application/json",
-          `base-sterilisation-${stamp}.json`
+          `base-sterilisation-${site}-${stamp}.json`
         );
       } else {
         const rows = [
-          ["Stérilisateur", "Date", "Cycle", "Nombre de sachets", "Codes des sachets"],
+          ["Site", "Stérilisateur", "Date", "Cycle", "Nombre de sachets", "Codes des sachets"],
         ];
         full.forEach((s) => {
           if (s.charges.length === 0) {
-            rows.push([s.name, "", "", "0", ""]);
+            rows.push([site, s.name, "", "", "0", ""]);
             return;
           }
           s.charges.forEach((c) => {
             rows.push([
+              site,
               s.name,
               formatDateFR(c.date),
               c.cycleNumber,
@@ -670,7 +709,7 @@ function DatabasesPanel({ sterilizers, fetchHistoryForSterilizer }) {
         const bom = String.fromCharCode(0xfeff);
         const csv =
           bom + rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
-        downloadFile(csv, "text/csv;charset=utf-8", `base-sterilisation-${stamp}.csv`);
+        downloadFile(csv, "text/csv;charset=utf-8", `base-sterilisation-${site}-${stamp}.csv`);
       }
     } catch {
       setExportErr("Erreur pendant l'export. Vérifie ta connexion et réessaie.");

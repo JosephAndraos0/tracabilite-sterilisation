@@ -4,7 +4,14 @@ service cloud.firestore {
     // L'appareil se connecte en mode anonyme (voir src/firebase.js), donc
     // request.auth existe toujours pour un usage normal de l'app. Ça bloque
     // les lectures/écritures depuis l'extérieur de l'app.
-    match /sterilisateurs/{sterilizerId} {
+    //
+    // Chaque identifiant de connexion (STJ, STH, SADP, ASSO, MSC, SJSR,
+    // SJSRG) a sa propre base, isolée sous sites/{site}. L'app ne connaît que
+    // le chemin de son propre site — un site ne voit donc jamais les données
+    // d'un autre. NOTE : comme l'authentification est anonyme, cette
+    // séparation est fonctionnelle, pas une barrière de sécurité forte ;
+    // pour ça il faudrait Firebase Auth avec un compte par site.
+    match /sites/{site}/sterilisateurs/{sterilizerId} {
       allow read, write: if request.auth != null;
 
       // Chaque stérilisateur a sa propre sous-collection de charges.
