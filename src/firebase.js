@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getAuth, signInAnonymously } from "firebase/auth";
 
 // Ces valeurs viennent de ton fichier .env (voir .env.example).
 // Va dans la console Firebase > Paramètres du projet > tes apps > config SDK
@@ -18,19 +18,20 @@ export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// L'appareil est partagé (kiosk) donc pas d'écran de login: on s'authentifie
-// silencieusement en mode anonyme au démarrage. Ça permet quand même de
-// protéger la base de données avec des règles Firestore (voir firestore.rules)
-// au lieu de la laisser complètement ouverte.
-export function ensureAuth() {
-  return new Promise((resolve, reject) => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        unsubscribe();
-        resolve(user);
-      } else {
-        signInAnonymously(auth).catch(reject);
-      }
-    });
-  });
+// L'appareil est partagé (kiosk) : on s'authentifie silencieusement en mode
+// anonyme. Ça permet quand même de protéger la base avec des règles Firestore
+// (voir firestore.rules) au lieu de la laisser complètement ouverte.
+//
+// `authStateReady()` attend que Firebase ait fini de charger l'état stocké
+// (évite de rester bloqué au démarrage) ; ensuite on se connecte si besoin.
+// Un délai de sécurité évite un « Chargement… » infini si le réseau coince.
+export async function ensureAuth() {
+  await auth.authStateReady();
+  if (auth.currentUser) return auth.currentUser;
+
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Délai de connexion dépassé")), 15000)
+  );
+  const cred = await Promise.race([signInAnonymously(auth), timeout]);
+  return cred.user;
 }

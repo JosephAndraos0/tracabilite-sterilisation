@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   collection,
-  onSnapshot,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -30,6 +29,12 @@ const readAuthUser = () => {
     return null;
   }
 };
+
+// Tri stable des stérilisateurs (S1, S2, S10… dans le bon ordre).
+const sortSterilizers = (list) =>
+  [...list].sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), "fr", { numeric: true })
+  );
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const formatDateFR = (iso) => {
@@ -94,24 +99,44 @@ export default function App() {
       .catch(() => setErr("Impossible de se connecter à la base de données."));
   }, []);
 
+  // La liste des stérilisateurs est chargée en une fois (getDocs), pas en
+  // temps réel : les listeners temps réel de Firestore sont bloqués sur
+  // certains réseaux (proxies, wifi d'établissement) et faisaient rester
+  // l'app sur « Chargement… ». On recharge après chaque modification, et un
+  // bouton « Rafraîchir » permet de resynchroniser manuellement si l'app est
+  // ouverte sur plusieurs appareils.
+  const loadSterilizers = useCallback(async () => {
+    try {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 15000)
+      );
+      const snap = await Promise.race([getDocs(siteCol("sterilisateurs")), timeout]);
+      setSterilizers(
+        sortSterilizers(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      );
+      setErr("");
+    } catch {
+      setSterilizers((prev) => prev || []);
+      setErr("Connexion à la base impossible. Vérifie le réseau puis « Rafraîchir ».");
+    }
+  }, [siteCol]);
+
   useEffect(() => {
     if (!ready || !authUser) return;
     setSterilizers(null);
-    const unsubS = onSnapshot(
-      siteCol("sterilisateurs"),
-      (snap) => setSterilizers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      () => setErr("Erreur de lecture des stérilisateurs.")
-    );
-    return () => unsubS();
-  }, [ready, authUser, siteCol]);
+    loadSterilizers();
+  }, [ready, authUser, loadSterilizers]);
 
   const addSterilizer = useCallback(
     async (name, startCycle) => {
       try {
-        await addDoc(siteCol("sterilisateurs"), {
+        const ref = await addDoc(siteCol("sterilisateurs"), {
           name,
           nextCycle: startCycle,
         });
+        setSterilizers((prev) =>
+          sortSterilizers([...(prev || []), { id: ref.id, name, nextCycle: startCycle }])
+        );
       } catch {
         setErr("Erreur en ajoutant le stérilisateur.");
       }
@@ -121,6 +146,9 @@ export default function App() {
 
   const updateSterilizerCycle = useCallback(
     async (id, nextCycle) => {
+      setSterilizers((prev) =>
+        prev ? prev.map((s) => (s.id === id ? { ...s, nextCycle } : s)) : prev
+      );
       try {
         await updateDoc(siteDoc("sterilisateurs", id), { nextCycle });
       } catch {
@@ -132,13 +160,15 @@ export default function App() {
 
   const removeSterilizer = useCallback(
     async (id) => {
+      setSterilizers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
       try {
         await deleteDoc(siteDoc("sterilisateurs", id));
       } catch {
         setErr("Erreur en retirant le stérilisateur.");
+        loadSterilizers();
       }
     },
-    [siteDoc]
+    [siteDoc, loadSterilizers]
   );
 
   // Transaction: réserve le numéro de cycle du stérilisateur et crée la
@@ -165,6 +195,14 @@ export default function App() {
         tx.update(sterilizerRef, { nextCycle: cycleNumber + 1 });
         return { id: chargeRef.id, ...newCharge };
       });
+      // Pas de temps réel : on reflète le nouveau numéro de cycle localement.
+      setSterilizers((prev) =>
+        prev
+          ? prev.map((s) =>
+              s.id === sterilizerId ? { ...s, nextCycle: charge.cycleNumber + 1 } : s
+            )
+          : prev
+      );
       return charge;
     },
     [siteCol, siteDoc]
@@ -271,8 +309,11 @@ export default function App() {
                 Déconnexion
               </button>
             </div>
+            <button className="ts-refresh" onClick={loadSterilizers}>
+              ↻ Rafraîchir la liste
+            </button>
             <div className="ts-side-foot-note">
-              Données partagées en temps réel via Firebase
+              Base isolée du site {authUser}
             </div>
           </div>
         </aside>
@@ -1041,6 +1082,8 @@ const css = `
 .ts-user-row strong { color: #EAF0EE; font-weight: 600; }
 .ts-logout { background: none; border: 1px solid rgba(255,255,255,0.22); color: #C7DCDA; font-size: 11px; padding: 4px 9px; border-radius: 5px; cursor: pointer; font-family: 'Inter', sans-serif; flex-shrink: 0; }
 .ts-logout:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.ts-refresh { width: 100%; background: none; border: 1px solid rgba(255,255,255,0.18); color: #C7DCDA; font-size: 12px; padding: 7px 9px; border-radius: 6px; cursor: pointer; font-family: 'Inter', sans-serif; margin-bottom: 10px; }
+.ts-refresh:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .ts-side-foot-note { font-size: 11px; color: #6C9391; line-height: 1.5; }
 
 /* Carte d'export de la base */
