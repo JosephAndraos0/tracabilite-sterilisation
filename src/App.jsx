@@ -1099,6 +1099,14 @@ const css = `
   @page { size: 3.5in 1.1in; margin: 0; }
   body * { visibility: hidden; }
   #ts-printable, #ts-printable * { visibility: visible; }
+  /* visibility:hidden garde la mise en page (sidebar, formulaires, min-height:
+     100vh du shell) dans le flux : sur une page normale ça ne créait qu'une
+     page blanche de trop, invisible dans le lot — mais avec une page
+     d'étiquette de 1.1in de haut, cette hauteur invisible se transforme en
+     plusieurs pages blanches supplémentaires par impression. On force donc le
+     shell à une hauteur nulle ; #ts-printable reste affiché car il passe en
+     position absolute ci-dessous, hors du flux normal. */
+  .ts-shell { height: 0; min-height: 0; overflow: hidden; }
   #ts-printable { position: absolute; top: 0; left: 0; }
   #ts-printable .ts-label {
     width: 3.5in;
