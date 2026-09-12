@@ -278,11 +278,12 @@ export default function App() {
             <div className="ts-brand-mark" aria-hidden="true">
               <svg viewBox="0 0 40 40" width="28" height="28">
                 <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" />
-                <path d="M20 8 L20 20 L28 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="35" cy="20" r="2.2" fill="currentColor" />
               </svg>
             </div>
             <div>
-              <div className="ts-brand-title">Traçabilité</div>
+              <div className="ts-brand-title">MediTrace</div>
               <div className="ts-brand-sub">Stérilisation</div>
             </div>
           </div>
@@ -925,11 +926,12 @@ function LoginScreen({ onLogin }) {
           <div className="ts-login-mark" aria-hidden="true">
             <svg viewBox="0 0 40 40" width="30" height="30">
               <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" />
-              <path d="M20 8 L20 20 L28 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="35" cy="20" r="2.2" fill="currentColor" />
             </svg>
           </div>
           <div>
-            <div className="ts-login-title">Traçabilité</div>
+            <div className="ts-login-title">MediTrace</div>
             <div className="ts-login-sub">Stérilisation</div>
           </div>
         </div>
