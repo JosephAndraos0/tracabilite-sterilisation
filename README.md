@@ -1,6 +1,8 @@
-# Traçabilité Stérilisation
+# MediTrace
 
 App interne pour tracer les charges de stérilisation : stérilisateur → cycle → sachets.
+
+Disponible en production sur [meditrace.ca](https://meditrace.ca).
 
 ## 1. Créer le projet Firebase
 
