@@ -553,23 +553,24 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
           <div className="ts-labels-grid" id="ts-printable" style={{ marginTop: sachets.length ? 18 : 0 }}>
             {sachets.map((s) => (
               <div className="ts-label" key={s.code}>
-                <div className="ts-label-brand">
-                  <svg viewBox="0 0 40 40" width="11" height="11" aria-hidden="true">
-                    <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3.5" />
-                    <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                    <circle cx="35" cy="20" r="3" fill="currentColor" />
-                  </svg>
-                  MediTrace
-                </div>
-                <div className="ts-label-body">
-                  <div className="ts-label-head">
-                    <div>{formatDateFR(session.date)}</div>
-                    <div>
-                      {session.sterilizerName} &nbsp; CYCLE {session.cycleNumber}
+                <div className="ts-label-grid">
+                  <div className="ts-label-col">
+                    <div className="ts-label-brand">
+                      <svg viewBox="0 0 40 40" width="10" height="10" aria-hidden="true">
+                        <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                        <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <circle cx="35" cy="20" r="3" fill="currentColor" />
+                      </svg>
+                      MediTrace
                     </div>
+                    <div className="ts-label-site">{session.sterilizerName}</div>
                   </div>
-                  <div className="ts-label-num">{s.code}</div>
+                  <div className="ts-label-col ts-label-col-right">
+                    <div className="ts-label-date">{formatDateFR(session.date)}</div>
+                    <div className="ts-label-cycle">CYCLE {session.cycleNumber}</div>
+                  </div>
                 </div>
+                <div className="ts-label-num">{s.code}</div>
               </div>
             ))}
           </div>
@@ -888,23 +889,24 @@ function DatabasesPanel({ site, sterilizers, fetchHistoryForSterilizer }) {
         <div className="ts-labels-grid ts-print-offscreen" id="ts-printable">
           {printCharge.sachets.map((s) => (
             <div className="ts-label" key={s.code}>
-              <div className="ts-label-brand">
-                <svg viewBox="0 0 40 40" width="11" height="11" aria-hidden="true">
-                  <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3.5" />
-                  <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <circle cx="35" cy="20" r="3" fill="currentColor" />
-                </svg>
-                MediTrace
-              </div>
-              <div className="ts-label-body">
-                <div className="ts-label-head">
-                  <div>{formatDateFR(printCharge.date)}</div>
-                  <div>
-                    {printCharge.sterilizerName} &nbsp; CYCLE {printCharge.cycleNumber}
+              <div className="ts-label-grid">
+                <div className="ts-label-col">
+                  <div className="ts-label-brand">
+                    <svg viewBox="0 0 40 40" width="10" height="10" aria-hidden="true">
+                      <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                      <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <circle cx="35" cy="20" r="3" fill="currentColor" />
+                    </svg>
+                    MediTrace
                   </div>
+                  <div className="ts-label-site">{printCharge.sterilizerName}</div>
                 </div>
-                <div className="ts-label-num">{s.code}</div>
+                <div className="ts-label-col ts-label-col-right">
+                  <div className="ts-label-date">{formatDateFR(printCharge.date)}</div>
+                  <div className="ts-label-cycle">CYCLE {printCharge.cycleNumber}</div>
+                </div>
               </div>
+              <div className="ts-label-num">{s.code}</div>
             </div>
           ))}
         </div>
@@ -1076,11 +1078,13 @@ const css = `
 .ts-sheet-title { font-weight: 700; font-size: 15px; }
 .ts-sheet-sub { font-size: 12px; color: var(--steel); margin-top: 2px; }
 .ts-labels-grid { display: flex; flex-wrap: wrap; gap: 12px; }
-.ts-label { width: 280px; aspect-ratio: 3.5 / 1.1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 8px 16px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #fff; }
-.ts-label-brand { display: flex; align-items: center; gap: 4px; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--teal-deep); }
-.ts-label-body { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 14px; }
-.ts-label-head { font-family: 'Courier New', Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.35; white-space: nowrap; }
-.ts-label-num { font-family: 'Courier New', Consolas, monospace; font-size: 22px; font-weight: 600; text-align: right; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
+.ts-label { width: 280px; aspect-ratio: 3.5 / 1.1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 10px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 5px; background: #fff; }
+.ts-label-grid { display: flex; flex-direction: row; justify-content: space-between; gap: 12px; }
+.ts-label-col { display: flex; flex-direction: column; gap: 2px; }
+.ts-label-col-right { align-items: flex-end; text-align: right; }
+.ts-label-brand { display: flex; align-items: center; gap: 4px; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--teal-deep); white-space: nowrap; }
+.ts-label-site, .ts-label-date, .ts-label-cycle { font-family: 'Courier New', Consolas, monospace; font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.ts-label-num { font-family: 'Courier New', Consolas, monospace; font-size: 28px; font-weight: 700; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
 
 /* Connexion */
 .ts-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: linear-gradient(160deg, #0F3D3D 0%, #17514F 55%, #1F5C5C 100%); font-family: 'Inter', sans-serif; box-sizing: border-box; }
@@ -1123,17 +1127,20 @@ const css = `
      shell à une hauteur nulle ; #ts-printable reste affiché car il passe en
      position absolute ci-dessous, hors du flux normal. */
   .ts-shell { height: 0; min-height: 0; overflow: hidden; }
-  #ts-printable { position: absolute; top: 0; left: 0; }
+  /* Le conteneur imprimable a un style inline marginTop (espacement voulu à
+     l'écran, sous la liste de sachets) — sans reset ici, ce décalage
+     s'ajoute à la hauteur de la page et peut faire déborder l'étiquette sur
+     une 2e page blanche. On l'annule explicitement à l'impression. */
+  #ts-printable { position: absolute; top: 0; left: 0; margin: 0 !important; }
   #ts-printable .ts-label {
     width: 3.5in;
     height: 1.1in;
     box-sizing: border-box;
     border: none;
-    padding: 0.05in 0.2in;
+    padding: 0.06in 0.2in;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    gap: 0.05in;
+    justify-content: space-between;
     page-break-after: always;
     break-after: page;
   }
@@ -1141,35 +1148,37 @@ const css = `
     page-break-after: auto;
     break-after: auto;
   }
+  #ts-printable .ts-label-grid {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 0.15in;
+  }
+  #ts-printable .ts-label-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   #ts-printable .ts-label-brand {
     display: flex;
     align-items: center;
     gap: 0.04in;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
     color: #0F3D3D;
     white-space: nowrap;
   }
-  #ts-printable .ts-label-body {
-    display: flex;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.08in;
-  }
-  #ts-printable .ts-label-head {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 10px;
-    line-height: 1.25;
+  #ts-printable .ts-label-site,
+  #ts-printable .ts-label-date,
+  #ts-printable .ts-label-cycle {
+    font-size: 12px;
     white-space: nowrap;
   }
-  #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 24px;
+    font-size: 34px;
+    text-align: center;
     white-space: nowrap;
   }
 }
