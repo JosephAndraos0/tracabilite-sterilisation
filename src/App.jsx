@@ -1061,9 +1061,9 @@ const css = `
 .ts-sheet-title { font-weight: 700; font-size: 15px; }
 .ts-sheet-sub { font-size: 12px; color: var(--steel); margin-top: 2px; }
 .ts-labels-grid { display: flex; flex-wrap: wrap; gap: 12px; }
-.ts-label { width: 192px; aspect-ratio: 2 / 1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; background: #fff; }
-.ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.3; }
-.ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 25px; font-weight: 600; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); }
+.ts-label { width: 280px; aspect-ratio: 3.5 / 1.1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 10px 16px; display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 14px; background: #fff; }
+.ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.35; white-space: nowrap; }
+.ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; text-align: right; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
 
 /* Connexion */
 .ts-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: linear-gradient(160deg, #0F3D3D 0%, #17514F 55%, #1F5C5C 100%); font-family: 'Inter', sans-serif; box-sizing: border-box; }
@@ -1096,21 +1096,21 @@ const css = `
 .ts-btn:disabled { opacity: 0.55; cursor: default; }
 
 @media print {
-  @page { size: 2in 1in; margin: 0; }
+  @page { size: 3.5in 1.1in; margin: 0; }
   body * { visibility: hidden; }
   #ts-printable, #ts-printable * { visibility: visible; }
   #ts-printable { position: absolute; top: 0; left: 0; }
   #ts-printable .ts-label {
-    width: 2in;
-    height: 1in;
+    width: 3.5in;
+    height: 1.1in;
     box-sizing: border-box;
     border: none;
-    padding: 0.03in 0.12in;
+    padding: 0.06in 0.2in;
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-start;
-    gap: 0.03in;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.2in;
     page-break-after: always;
     break-after: page;
   }
@@ -1119,14 +1119,17 @@ const css = `
     break-after: auto;
   }
   #ts-printable .ts-label-head {
-    font-size: 17px;
-    line-height: 1.1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 15px;
+    line-height: 1.25;
     white-space: nowrap;
   }
   #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 36px;
-    align-self: center;
+    font-size: 34px;
+    white-space: nowrap;
   }
 }
 `;
