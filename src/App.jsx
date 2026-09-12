@@ -278,13 +278,11 @@ export default function App() {
             <div className="ts-brand-mark" aria-hidden="true">
               <svg viewBox="0 0 40 40" width="28" height="28">
                 <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" />
-                <path d="M20 8 L20 20 L28 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="35" cy="20" r="2.2" fill="currentColor" />
               </svg>
             </div>
-            <div>
-              <div className="ts-brand-title">Traçabilité</div>
-              <div className="ts-brand-sub">Stérilisation</div>
-            </div>
+            <div className="ts-brand-title">MediTrace</div>
           </div>
           <nav className="ts-nav">
             <button className={tab === "nouvelle" ? "active" : ""} onClick={() => setTab("nouvelle")}>
@@ -925,13 +923,11 @@ function LoginScreen({ onLogin }) {
           <div className="ts-login-mark" aria-hidden="true">
             <svg viewBox="0 0 40 40" width="30" height="30">
               <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" />
-              <path d="M20 8 L20 20 L28 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="35" cy="20" r="2.2" fill="currentColor" />
             </svg>
           </div>
-          <div>
-            <div className="ts-login-title">Traçabilité</div>
-            <div className="ts-login-sub">Stérilisation</div>
-          </div>
+          <div className="ts-login-title">MediTrace</div>
         </div>
 
         <form className="ts-login-form" onSubmit={submit}>
@@ -999,7 +995,6 @@ const css = `
 .ts-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
 .ts-brand-mark { color: #7FB8B5; display: flex; }
 .ts-brand-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
-.ts-brand-sub { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #8FB5B2; }
 .ts-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .ts-nav button { text-align: left; background: none; border: none; color: #C7DCDA; font-family: 'Inter', sans-serif; font-size: 14px; padding: 11px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.15s; }
 .ts-nav button:hover { background: rgba(255,255,255,0.06); }
@@ -1071,7 +1066,6 @@ const css = `
 .ts-login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
 .ts-login-mark { color: var(--teal-mid); display: flex; }
 .ts-login-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 20px; color: var(--ink); letter-spacing: -0.01em; line-height: 1.1; }
-.ts-login-sub { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--steel); margin-top: 2px; }
 .ts-login-form { display: flex; flex-direction: column; gap: 14px; }
 .ts-login-lead { font-size: 13px; color: var(--steel); line-height: 1.5; }
 .ts-login-error { background: #FBEAEA; color: #9B3B3B; padding: 9px 12px; border-radius: 6px; font-size: 12.5px; }
