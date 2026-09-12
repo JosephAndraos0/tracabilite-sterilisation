@@ -1079,8 +1079,8 @@ const css = `
 .ts-label { width: 280px; aspect-ratio: 3.5 / 1.1; box-sizing: border-box; border: 1px solid var(--ink); border-radius: 4px; padding: 8px 16px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #fff; }
 .ts-label-brand { display: flex; align-items: center; gap: 4px; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--teal-deep); }
 .ts-label-body { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 14px; }
-.ts-label-head { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.35; white-space: nowrap; }
-.ts-label-num { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; text-align: right; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
+.ts-label-head { font-family: 'Courier New', Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.35; white-space: nowrap; }
+.ts-label-num { font-family: 'Courier New', Consolas, monospace; font-size: 22px; font-weight: 600; text-align: right; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
 
 /* Connexion */
 .ts-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: linear-gradient(160deg, #0F3D3D 0%, #17514F 55%, #1F5C5C 100%); font-family: 'Inter', sans-serif; box-sizing: border-box; }
@@ -1157,19 +1157,19 @@ const css = `
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    gap: 0.2in;
+    gap: 0.08in;
   }
   #ts-printable .ts-label-head {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    font-size: 15px;
+    font-size: 10px;
     line-height: 1.25;
     white-space: nowrap;
   }
   #ts-printable .ts-label-head > div { white-space: nowrap; }
   #ts-printable .ts-label-num {
-    font-size: 34px;
+    font-size: 24px;
     white-space: nowrap;
   }
 }
