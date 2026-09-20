@@ -18,7 +18,7 @@ import { db, ensureAuth } from "./firebase.js";
 // (l'appli n'a pas de serveur à elle) : ça empêche l'accès occasionnel, mais ce
 // n'est pas une barrière de sécurité forte — quelqu'un de technique peut lire
 // ces valeurs dans le code. Pour une vraie protection il faudrait Firebase Auth.
-const AUTHORIZED_USERS = ["STJ", "STH", "SADP", "ASSO", "MSC", "SJSR", "SJSRG"];
+const AUTHORIZED_USERS = ["STJ", "STH", "SADP", "ASSO", "MSC", "SJSR", "SJSRG", "MRD", "CDS"];
 const SHARED_PASSWORD = "11520";
 const AUTH_KEY = "ts-auth";
 

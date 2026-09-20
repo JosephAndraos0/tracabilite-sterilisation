@@ -6,7 +6,7 @@ service cloud.firestore {
     // les lectures/écritures depuis l'extérieur de l'app.
     //
     // Chaque identifiant de connexion (STJ, STH, SADP, ASSO, MSC, SJSR,
-    // SJSRG) a sa propre base, isolée sous sites/{site}. L'app ne connaît que
+    // SJSRG, MRD, CDS) a sa propre base, isolée sous sites/{site}. L'app ne connaît que
     // le chemin de son propre site — un site ne voit donc jamais les données
     // d'un autre. NOTE : comme l'authentification est anonyme, cette
     // séparation est fonctionnelle, pas une barrière de sécurité forte ;
