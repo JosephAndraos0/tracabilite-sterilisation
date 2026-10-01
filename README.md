@@ -35,6 +35,14 @@ VITE_FIREBASE_APP_ID=1:123456789:web:abcdef
 
 Dans la console Firebase : **Build > Firestore Database > Règles**, colle le contenu de `firestore.rules` (déjà dans ce projet) et clique "Publier".
 
+Ou, plus rapide une fois le projet connecté (`firebase.json`/`.firebaserc` sont déjà dans ce repo) :
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase deploy --only firestore:rules
+```
+
 ## 4. Tester en local
 
 ```bash
