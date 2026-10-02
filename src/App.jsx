@@ -41,6 +41,23 @@ const formatDateFR = (iso) => {
   const [y, m, d] = iso.split("-");
   return `${parseInt(d)}/${m}/${y}`;
 };
+// Lundi de la semaine ISO contenant cette date (pour « déjà fait cette semaine »).
+const isoWeekStart = (iso) => {
+  const d = new Date(iso + "T00:00:00");
+  const day = d.getDay();
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  return d.toISOString().slice(0, 10);
+};
+
+// Noms temporaires — à remplacer une fois les vrais noms de tests confirmés
+// par la clinique. Les 3 types sont pré-remplis au premier chargement de
+// l'onglet Tests, et restent entièrement modifiables ensuite (y compris
+// « charge vide », qu'on ne sait pas encore associer au bon type).
+const DEFAULT_TEST_TYPES = [
+  { name: "Test quotidien A", frequency: "quotidien", beforeDayStart: true, emptyLoad: false, active: true },
+  { name: "Test quotidien B", frequency: "quotidien", beforeDayStart: false, emptyLoad: false, active: true },
+  { name: "Test hebdomadaire", frequency: "hebdomadaire", beforeDayStart: false, emptyLoad: false, active: true },
+];
 const genSachetCode = () =>
   "#" + Math.floor(1000000 + Math.random() * 9000000).toString();
 
@@ -68,6 +85,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("nouvelle");
   const [sterilizers, setSterilizers] = useState(null);
+  const [testTypes, setTestTypes] = useState(null);
   const [err, setErr] = useState("");
 
   const logout = useCallback(() => {
@@ -258,6 +276,168 @@ export default function App() {
     [siteCol]
   );
 
+  /* ---------------- Tests (indicateurs biologiques/chimiques) ---------------- */
+
+  // Quotidien avant hebdomadaire, puis ordre alphabétique — pas besoin d'un
+  // champ d'ordre dédié pour 3 types.
+  const sortTestTypes = (list) =>
+    [...list].sort((a, b) => {
+      const freq = (a.frequency === "hebdomadaire" ? 1 : 0) - (b.frequency === "hebdomadaire" ? 1 : 0);
+      return freq !== 0 ? freq : String(a.name).localeCompare(String(b.name), "fr");
+    });
+
+  // Chargé à la demande (seulement si l'onglet Tests est ouvert), pas au
+  // démarrage de l'app comme les stérilisateurs — testTypes ne sert qu'à cet
+  // onglet. Pré-remplit les 3 types temporaires si le site n'en a encore
+  // aucun (voir DEFAULT_TEST_TYPES).
+  const loadTestTypes = useCallback(async () => {
+    try {
+      const snap = await getDocs(siteCol("testTypes"));
+      if (snap.empty) {
+        const created = await Promise.all(
+          DEFAULT_TEST_TYPES.map(async (t) => {
+            const ref = await addDoc(siteCol("testTypes"), t);
+            return { id: ref.id, ...t };
+          })
+        );
+        setTestTypes(sortTestTypes(created));
+      } else {
+        setTestTypes(sortTestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+      }
+      setErr("");
+    } catch {
+      setTestTypes((prev) => prev || []);
+      setErr("Connexion à la base impossible pour les types de test. Vérifie le réseau.");
+    }
+  }, [siteCol]);
+
+  const addTestType = useCallback(
+    async (name, frequency, beforeDayStart, emptyLoad) => {
+      const t = { name, frequency, beforeDayStart, emptyLoad, active: true };
+      try {
+        const ref = await addDoc(siteCol("testTypes"), t);
+        setTestTypes((prev) => sortTestTypes([...(prev || []), { id: ref.id, ...t }]));
+      } catch {
+        setErr("Erreur en ajoutant le type de test.");
+      }
+    },
+    [siteCol]
+  );
+
+  const updateTestType = useCallback(
+    async (id, patch) => {
+      setTestTypes((prev) =>
+        prev ? sortTestTypes(prev.map((t) => (t.id === id ? { ...t, ...patch } : t))) : prev
+      );
+      try {
+        await updateDoc(siteDoc("testTypes", id), patch);
+      } catch {
+        setErr("Erreur en mettant à jour le type de test.");
+      }
+    },
+    [siteDoc]
+  );
+
+  // Jumeau exact de startCharge : même transaction (réserve le cycle au
+  // moment de la création, pas à une étape de confirmation ultérieure —
+  // voir le compte rendu pour la justification), même protection contre les
+  // doublons entre clics/appareils concurrents. Écrit dans la sous-collection
+  // tests du stérilisateur au lieu de charges, et fige une copie du type de
+  // test choisi (comme sterilizerName est figé sur une charge).
+  const startTest = useCallback(
+    async (sterilizerId, testType) => {
+      const sterilizerRef = siteDoc("sterilisateurs", sterilizerId);
+      const testRef = doc(siteCol("sterilisateurs", sterilizerId, "tests"));
+      const test = await runTransaction(db, async (tx) => {
+        const sterSnap = await tx.get(sterilizerRef);
+        if (!sterSnap.exists()) throw new Error("Stérilisateur introuvable");
+        const sterData = sterSnap.data();
+        const cycleNumber = sterData.nextCycle;
+        const newTest = {
+          date: todayISO(),
+          createdAt: new Date().toISOString(),
+          createdBy: authUser,
+          sterilizerId,
+          sterilizerName: sterData.name,
+          cycleNumber,
+          testTypeId: testType.id,
+          testTypeName: testType.name,
+          frequency: testType.frequency,
+          beforeDayStart: testType.beforeDayStart,
+          emptyLoad: testType.emptyLoad,
+          code: genSachetCode(),
+          result: "pass",
+          resultConfirmed: false,
+          resultHistory: [],
+        };
+        tx.set(testRef, newTest);
+        tx.update(sterilizerRef, { nextCycle: cycleNumber + 1 });
+        return { id: testRef.id, ...newTest };
+      });
+      setSterilizers((prev) =>
+        prev
+          ? prev.map((s) =>
+              s.id === sterilizerId ? { ...s, nextCycle: test.cycleNumber + 1 } : s
+            )
+          : prev
+      );
+      return test;
+    },
+    [siteCol, siteDoc, authUser]
+  );
+
+  // Généralise fetchChargesForDate à une plage de dates + filtres optionnels.
+  // Un seul champ en inégalité (date) par requête Firestore — pas besoin
+  // d'index composite ; type/résultat sont filtrés côté client, comme le
+  // tri/filtre déjà fait ailleurs dans l'app (sortSterilizers, ConsultPanel).
+  const fetchTests = useCallback(
+    async ({ from, to, sterilizerId, testTypeId, result }) => {
+      const targets = (sterilizers || []).filter((s) => !sterilizerId || s.id === sterilizerId);
+      const perSterilizer = await Promise.all(
+        targets.map(async (s) => {
+          const q = query(
+            siteCol("sterilisateurs", s.id, "tests"),
+            where("date", ">=", from),
+            where("date", "<=", to)
+          );
+          const snap = await getDocs(q);
+          return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        })
+      );
+      return perSterilizer
+        .flat()
+        .filter((t) => !testTypeId || t.testTypeId === testTypeId)
+        .filter((t) => !result || t.result === result)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    [sterilizers, siteCol]
+  );
+
+  // Simple updateDoc + arrayUnion (pas de transaction) : ne touche jamais
+  // cycleNumber/nextCycle, donc aucune course à protéger — même logique que
+  // addSachet. Garde l'échec précédent si rappelé (arrayUnion accumule).
+  const reportTestFailure = useCallback(
+    async (sterilizerId, testId, note) => {
+      const entry = { outcome: "echec", note: note || "", by: authUser, at: new Date().toISOString() };
+      try {
+        await updateDoc(siteDoc("sterilisateurs", sterilizerId, "tests", testId), {
+          result: "echec",
+          resultConfirmed: true,
+          resultHistory: arrayUnion(entry),
+        });
+        return entry;
+      } catch {
+        setErr("Erreur en signalant l'échec. Vérifie ta connexion et réessaie.");
+        return null;
+      }
+    },
+    [siteDoc, authUser]
+  );
+
+  useEffect(() => {
+    if (ready && authUser && tab === "tests" && testTypes === null) loadTestTypes();
+  }, [ready, authUser, tab, testTypes, loadTestTypes]);
+
   const loading = !ready || sterilizers === null;
 
   if (!authUser) {
@@ -294,8 +474,11 @@ export default function App() {
             <button className={tab === "sterilisateurs" ? "active" : ""} onClick={() => setTab("sterilisateurs")}>
               <span className="ts-nav-num">03</span> Stérilisateurs
             </button>
+            <button className={tab === "tests" ? "active" : ""} onClick={() => setTab("tests")}>
+              <span className="ts-nav-num">04</span> Tests
+            </button>
             <button className={tab === "bases" ? "active" : ""} onClick={() => setTab("bases")}>
-              <span className="ts-nav-num">04</span> Bases de données
+              <span className="ts-nav-num">05</span> Bases de données
             </button>
           </nav>
           <div className="ts-side-foot">
@@ -331,6 +514,16 @@ export default function App() {
             <NewChargePanel sterilizers={sterilizers} onStartCharge={startCharge} onAddSachet={addSachet} />
           ) : tab === "consulter" ? (
             <ConsultPanel sterilizers={sterilizers} fetchChargesForDate={fetchChargesForDate} />
+          ) : tab === "tests" ? (
+            <TestsPanel
+              sterilizers={sterilizers}
+              testTypes={testTypes}
+              onAddTestType={addTestType}
+              onUpdateTestType={updateTestType}
+              onStartTest={startTest}
+              fetchTests={fetchTests}
+              onReportFailure={reportTestFailure}
+            />
           ) : (
             <DatabasesPanel
               site={authUser}
@@ -915,6 +1108,604 @@ function DatabasesPanel({ site, sterilizers, fetchHistoryForSterilizer }) {
   );
 }
 
+/* ---------------- Tests ---------------- */
+function TestLabelCard({ test }) {
+  return (
+    <div className="ts-label ts-label-has-test">
+      <div className="ts-label-grid">
+        <div className="ts-label-col">
+          <div className="ts-label-brand">
+            <svg viewBox="0 0 40 40" width="10" height="10" aria-hidden="true">
+              <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3.5" />
+              <path d="M5 20 L13 20 L16 12 L20 28 L24 15 L28 20 L35 20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="35" cy="20" r="3" fill="currentColor" />
+            </svg>
+            MediTrace
+          </div>
+          <div className="ts-label-testname">{test.testTypeName}</div>
+          <div className="ts-label-site">{test.sterilizerName}</div>
+        </div>
+        <div className="ts-label-col ts-label-col-right">
+          <div className="ts-label-date">{formatDateFR(test.date)}</div>
+          <div className="ts-label-cycle">CYCLE {test.cycleNumber}</div>
+        </div>
+      </div>
+      <div className="ts-label-num">{test.code}</div>
+    </div>
+  );
+}
+
+function TestsPanel({
+  sterilizers,
+  testTypes,
+  onAddTestType,
+  onUpdateTestType,
+  onStartTest,
+  fetchTests,
+  onReportFailure,
+}) {
+  const [view, setView] = useState("nouveau");
+
+  return (
+    <div>
+      <h1 className="ts-h1">Tests</h1>
+      <p className="ts-lead">
+        Contrôles quotidiens et hebdomadaires des stérilisateurs — choisis la machine et le
+        test, puis enregistre et imprime l'étiquette.
+      </p>
+
+      <div className="ts-subnav">
+        <button className={view === "nouveau" ? "active" : ""} onClick={() => setView("nouveau")}>
+          Nouveau test
+        </button>
+        <button className={view === "historique" ? "active" : ""} onClick={() => setView("historique")}>
+          Historique
+        </button>
+        <button className={view === "types" ? "active" : ""} onClick={() => setView("types")}>
+          Types de test
+        </button>
+      </div>
+
+      {testTypes === null ? (
+        <div className="ts-loading">Chargement…</div>
+      ) : view === "nouveau" ? (
+        <NewTestFlow
+          sterilizers={sterilizers}
+          testTypes={testTypes}
+          onStartTest={onStartTest}
+          fetchTests={fetchTests}
+        />
+      ) : view === "historique" ? (
+        <TestHistory
+          sterilizers={sterilizers}
+          testTypes={testTypes}
+          fetchTests={fetchTests}
+          onReportFailure={onReportFailure}
+        />
+      ) : (
+        <TestTypesAdmin testTypes={testTypes} onAdd={onAddTestType} onUpdate={onUpdateTestType} />
+      )}
+    </div>
+  );
+}
+
+function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
+  const [sterilizerId, setSterilizerId] = useState(sterilizers[0]?.id || "");
+  const [selectedTypeId, setSelectedTypeId] = useState(null);
+  const [doneMap, setDoneMap] = useState({});
+  const [session, setSession] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!sterilizerId && sterilizers.length) setSterilizerId(sterilizers[0].id);
+  }, [sterilizers, sterilizerId]);
+
+  const activeTypes = testTypes.filter((t) => t.active !== false);
+
+  // Indicateur informatif « déjà fait aujourd'hui/cette semaine » — jamais
+  // bloquant, l'employé peut toujours refaire le test (demande explicite).
+  useEffect(() => {
+    if (!sterilizerId || activeTypes.length === 0) {
+      setDoneMap({});
+      return;
+    }
+    let cancelled = false;
+    const today = todayISO();
+    const weekStart = isoWeekStart(today);
+    fetchTests({ from: weekStart, to: today, sterilizerId })
+      .then((tests) => {
+        if (cancelled) return;
+        const map = {};
+        activeTypes.forEach((t) => {
+          const forType = tests.filter((x) => x.testTypeId === t.id);
+          map[t.id] =
+            t.frequency === "hebdomadaire" ? forType.length > 0 : forType.some((x) => x.date === today);
+        });
+        setDoneMap(map);
+      })
+      .catch(() => {
+        if (!cancelled) setDoneMap({});
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sterilizerId, testTypes, fetchTests]);
+
+  const sterilizer = sterilizers.find((s) => s.id === sterilizerId);
+  const selectedType = activeTypes.find((t) => t.id === selectedTypeId);
+
+  // Imprime une fois dès que l'enregistrement créé est disponible — déclenché
+  // par effet (pas en synchrone juste après le await) pour laisser React
+  // committer le rendu de la zone imprimable avant l'appel à window.print(),
+  // comme le fait déjà la réimpression de DatabasesPanel.
+  useEffect(() => {
+    if (session) window.print();
+  }, [session]);
+
+  const confirm = async () => {
+    if (!sterilizer || !selectedType) return;
+    setBusy(true);
+    setError("");
+    try {
+      const test = await onStartTest(sterilizer.id, selectedType);
+      setSession(test);
+    } catch {
+      setError("Erreur en démarrant le test. Réessaie.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => {
+    setSession(null);
+    setSelectedTypeId(null);
+    setError("");
+  };
+
+  if (sterilizers.length === 0) {
+    return (
+      <div className="ts-empty">
+        Configure d'abord au moins un stérilisateur dans l'onglet « Stérilisateurs ».
+      </div>
+    );
+  }
+
+  if (session) {
+    return (
+      <div className="ts-card ts-sheet">
+        <div className="ts-sheet-head">
+          <div>
+            <div className="ts-sheet-title">
+              Cycle {session.cycleNumber} · {session.sterilizerName}
+            </div>
+            <div className="ts-sheet-sub">
+              {session.testTypeName} · {formatDateFR(session.date)}
+            </div>
+          </div>
+        </div>
+
+        <div className="ts-print-actions">
+          <button className="ts-btn ts-btn-print" onClick={() => window.print()}>
+            Imprimer à nouveau
+          </button>
+          <button className="ts-btn ts-btn-stop" onClick={reset}>
+            Nouveau test
+          </button>
+        </div>
+
+        <div className="ts-labels-grid" id="ts-printable" style={{ marginTop: 18 }}>
+          <TestLabelCard test={session} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ts-card">
+      <div className="ts-form-row">
+        <div className="ts-field">
+          <label>Stérilisateur</label>
+          <select
+            value={sterilizerId}
+            onChange={(e) => {
+              setSterilizerId(e.target.value);
+              setSelectedTypeId(null);
+            }}
+          >
+            {sterilizers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {activeTypes.length === 0 ? (
+        <div className="ts-empty" style={{ marginTop: 16 }}>
+          Aucun type de test configuré. Ajoute-en un dans l'onglet « Types de test ».
+        </div>
+      ) : (
+        <div className="ts-testtype-grid" style={{ marginTop: 18 }}>
+          {activeTypes.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={"ts-testtype-card" + (selectedTypeId === t.id ? " active" : "")}
+              onClick={() => setSelectedTypeId(t.id)}
+            >
+              <div className="ts-testtype-name">{t.name}</div>
+              <div className="ts-testtype-badges">
+                <span className="ts-badge">{t.frequency === "hebdomadaire" ? "Hebdomadaire" : "Quotidien"}</span>
+                {t.beforeDayStart && <span className="ts-badge">Avant le début de journée</span>}
+                {t.emptyLoad && <span className="ts-badge ts-badge-amber">Charge vide</span>}
+              </div>
+              {doneMap[t.id] && (
+                <div className="ts-testtype-done">
+                  ✓ {t.frequency === "hebdomadaire" ? "Déjà fait cette semaine" : "Déjà fait aujourd'hui"}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selectedType && (
+        <div className="ts-preview-strip" style={{ marginTop: 18 }}>
+          <div>
+            <span className="ts-mono-label">Test</span>
+            <span className="ts-mono-val">{selectedType.name}</span>
+          </div>
+          <div>
+            <span className="ts-mono-label">Date</span>
+            <span className="ts-mono-val">{formatDateFR(todayISO())}</span>
+          </div>
+          <div>
+            <span className="ts-mono-label">Cycle</span>
+            <span className="ts-mono-val">{sterilizer ? sterilizer.nextCycle : "—"}</span>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="ts-error" style={{ marginTop: 14 }}>
+          {error}
+        </div>
+      )}
+
+      <button
+        className="ts-btn ts-btn-primary ts-btn-wide"
+        onClick={confirm}
+        disabled={!selectedType || busy}
+      >
+        {busy ? "Enregistrement…" : "Enregistrer et imprimer"}
+      </button>
+    </div>
+  );
+}
+
+function TestHistory({ sterilizers, testTypes, fetchTests, onReportFailure }) {
+  const [from, setFrom] = useState(todayISO());
+  const [to, setTo] = useState(todayISO());
+  const [sterilizerId, setSterilizerId] = useState("");
+  const [testTypeId, setTestTypeId] = useState("");
+  const [result, setResult] = useState("");
+  const [tests, setTests] = useState(null);
+  const [error, setError] = useState("");
+  const [openId, setOpenId] = useState(null);
+  const [failId, setFailId] = useState(null);
+  const [failNote, setFailNote] = useState("");
+  const [printTest, setPrintTest] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTests(null);
+    setError("");
+    fetchTests({
+      from,
+      to,
+      sterilizerId: sterilizerId || undefined,
+      testTypeId: testTypeId || undefined,
+      result: result || undefined,
+    })
+      .then((r) => {
+        if (!cancelled) setTests(r);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Erreur en chargeant l'historique des tests.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [from, to, sterilizerId, testTypeId, result, fetchTests]);
+
+  useEffect(() => {
+    if (printTest) {
+      window.print();
+      setPrintTest(null);
+    }
+  }, [printTest]);
+
+  const reprint = (t, e) => {
+    e.stopPropagation();
+    setPrintTest(t);
+  };
+
+  const submitFailure = async (t) => {
+    const entry = await onReportFailure(t.sterilizerId, t.id, failNote);
+    if (entry) {
+      setTests((prev) =>
+        prev
+          ? prev.map((x) =>
+              x.id === t.id
+                ? {
+                    ...x,
+                    result: "echec",
+                    resultConfirmed: true,
+                    resultHistory: [...(x.resultHistory || []), entry],
+                  }
+                : x
+            )
+          : prev
+      );
+      setFailId(null);
+      setFailNote("");
+    }
+  };
+
+  return (
+    <div>
+      <div className="ts-card ts-form-row">
+        <div className="ts-field ts-field-narrow">
+          <label>Du</label>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="ts-field ts-field-narrow">
+          <label>Au</label>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        <div className="ts-field">
+          <label>Stérilisateur</label>
+          <select value={sterilizerId} onChange={(e) => setSterilizerId(e.target.value)}>
+            <option value="">Tous</option>
+            {sterilizers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="ts-field">
+          <label>Type de test</label>
+          <select value={testTypeId} onChange={(e) => setTestTypeId(e.target.value)}>
+            <option value="">Tous</option>
+            {testTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="ts-field ts-field-narrow">
+          <label>Résultat</label>
+          <select value={result} onChange={(e) => setResult(e.target.value)}>
+            <option value="">Tous</option>
+            <option value="pass">Non vérifié</option>
+            <option value="echec">Échec signalé</option>
+          </select>
+        </div>
+      </div>
+
+      {error && <div className="ts-error">{error}</div>}
+
+      {tests === null ? (
+        <div className="ts-loading">Chargement…</div>
+      ) : tests.length === 0 ? (
+        <div className="ts-empty">Aucun test enregistré pour ces critères.</div>
+      ) : (
+        <div className="ts-list">
+          {tests.map((t) => (
+            <div key={t.id}>
+              <div
+                className="ts-list-item ts-clickable"
+                onClick={() => setOpenId(openId === t.id ? null : t.id)}
+              >
+                <div className="ts-list-item-main">
+                  <div className="ts-list-item-title">
+                    Cycle {t.cycleNumber} · {t.sterilizerName} · {t.testTypeName}
+                  </div>
+                  <div className="ts-list-item-sub">
+                    {formatDateFR(t.date)} · créé par {t.createdBy}
+                  </div>
+                </div>
+                <span className={"ts-result-badge" + (t.resultConfirmed ? " ts-result-badge-fail" : "")}>
+                  {t.resultConfirmed ? "Échec signalé" : "Non vérifié"}
+                </span>
+                <button className="ts-btn ts-btn-reprint" onClick={(e) => reprint(t, e)}>
+                  Réimprimer
+                </button>
+                <span className="ts-chevron">{openId === t.id ? "−" : "+"}</span>
+              </div>
+
+              {openId === t.id && (
+                <div className="ts-sublist">
+                  <div className="ts-test-detail">
+                    <div>
+                      <span className="ts-mono-label">Code</span>
+                      <span className="ts-mono-val">{t.code}</span>
+                    </div>
+                    <div>
+                      <span className="ts-mono-label">Fréquence</span>
+                      <span className="ts-mono-val">
+                        {t.frequency === "hebdomadaire" ? "Hebdomadaire" : "Quotidien"}
+                      </span>
+                    </div>
+                    {t.beforeDayStart && <span className="ts-badge">Avant le début de journée</span>}
+                    {t.emptyLoad && <span className="ts-badge ts-badge-amber">Charge vide</span>}
+                  </div>
+
+                  {t.resultHistory && t.resultHistory.length > 0 && (
+                    <div className="ts-result-history">
+                      <div className="ts-list-item-sub" style={{ marginBottom: 6 }}>
+                        Historique du résultat
+                      </div>
+                      {t.resultHistory.map((h, i) => (
+                        <div key={i} className="ts-result-history-entry">
+                          <strong>Échec</strong> signalé par {h.by} le {formatDateFR(h.at.slice(0, 10))}
+                          {h.note && <div className="ts-result-history-note">« {h.note} »</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {failId === t.id ? (
+                    <div className="ts-fail-card">
+                      <div className="ts-fail-title">Confirmer l'échec de ce test ?</div>
+                      <div className="ts-fail-sub">Cette action sera enregistrée de façon permanente.</div>
+                      <textarea
+                        className="ts-fail-note"
+                        placeholder="Note (optionnel)"
+                        value={failNote}
+                        onChange={(e) => setFailNote(e.target.value)}
+                      />
+                      <div className="ts-fail-actions">
+                        <button className="ts-btn ts-btn-stop" onClick={() => submitFailure(t)}>
+                          Confirmer l'échec
+                        </button>
+                        <button
+                          className="ts-btn ts-btn-ghost"
+                          onClick={() => {
+                            setFailId(null);
+                            setFailNote("");
+                          }}
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    !t.resultConfirmed && (
+                      <button className="ts-btn ts-btn-ghost" onClick={() => setFailId(t.id)}>
+                        Signaler un échec
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Zone imprimable hors écran : réimpression d'un test existant */}
+      {printTest && (
+        <div className="ts-labels-grid ts-print-offscreen" id="ts-printable">
+          <TestLabelCard test={printTest} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestTypesAdmin({ testTypes, onAdd, onUpdate }) {
+  const [name, setName] = useState("");
+  const [frequency, setFrequency] = useState("quotidien");
+  const [beforeDayStart, setBeforeDayStart] = useState(false);
+  const [emptyLoad, setEmptyLoad] = useState(false);
+
+  const add = () => {
+    if (!name.trim()) return;
+    onAdd(name.trim(), frequency, beforeDayStart, emptyLoad);
+    setName("");
+    setFrequency("quotidien");
+    setBeforeDayStart(false);
+    setEmptyLoad(false);
+  };
+
+  return (
+    <div>
+      <div className="ts-card">
+        <div className="ts-form-row">
+          <div className="ts-field">
+            <label>Nom du test</label>
+            <input placeholder="Test quotidien A" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="ts-field ts-field-narrow">
+            <label>Fréquence</label>
+            <select value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+              <option value="quotidien">Quotidien</option>
+              <option value="hebdomadaire">Hebdomadaire</option>
+            </select>
+          </div>
+        </div>
+        <div className="ts-checkbox-row">
+          <label className="ts-checkbox-field">
+            <input
+              type="checkbox"
+              checked={beforeDayStart}
+              onChange={(e) => setBeforeDayStart(e.target.checked)}
+            />
+            Avant le début de journée
+          </label>
+          <label className="ts-checkbox-field">
+            <input type="checkbox" checked={emptyLoad} onChange={(e) => setEmptyLoad(e.target.checked)} />
+            Charge vide (une seule étiquette)
+          </label>
+        </div>
+        <button className="ts-btn ts-btn-primary" onClick={add} style={{ marginTop: 14 }}>
+          Ajouter
+        </button>
+      </div>
+
+      {testTypes.length === 0 ? (
+        <div className="ts-empty">Aucun type de test configuré.</div>
+      ) : (
+        <div className="ts-testtype-admin-list">
+          {testTypes.map((t) => (
+            <div className="ts-card ts-testtype-admin-row" key={t.id}>
+              <input
+                className="ts-testtype-name-input"
+                value={t.name}
+                onChange={(e) => onUpdate(t.id, { name: e.target.value })}
+              />
+              <select value={t.frequency} onChange={(e) => onUpdate(t.id, { frequency: e.target.value })}>
+                <option value="quotidien">Quotidien</option>
+                <option value="hebdomadaire">Hebdomadaire</option>
+              </select>
+              <label className="ts-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={!!t.beforeDayStart}
+                  onChange={(e) => onUpdate(t.id, { beforeDayStart: e.target.checked })}
+                />
+                Avant le début de journée
+              </label>
+              <label className="ts-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={!!t.emptyLoad}
+                  onChange={(e) => onUpdate(t.id, { emptyLoad: e.target.checked })}
+                />
+                Charge vide
+              </label>
+              <label className="ts-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={t.active !== false}
+                  onChange={(e) => onUpdate(t.id, { active: e.target.checked })}
+                />
+                Actif
+              </label>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Écran de connexion ---------------- */
 function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -1084,7 +1875,50 @@ const css = `
 .ts-label-col-right { align-items: flex-end; text-align: right; }
 .ts-label-brand { display: flex; align-items: center; gap: 4px; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--teal-deep); white-space: nowrap; }
 .ts-label-site, .ts-label-date, .ts-label-cycle { font-family: 'Courier New', Consolas, monospace; font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.ts-label-testname { font-family: 'Courier New', Consolas, monospace; font-size: 12px; font-weight: 700; color: var(--teal-deep); white-space: nowrap; }
 .ts-label-num { font-family: 'Courier New', Consolas, monospace; font-size: 28px; font-weight: 700; text-align: center; letter-spacing: 0.03em; color: var(--teal-deep); white-space: nowrap; }
+
+/* Tests : sous-navigation interne de l'onglet */
+.ts-subnav { display: flex; gap: 20px; margin-bottom: 22px; border-bottom: 1px solid var(--line); }
+.ts-subnav button { background: none; border: none; padding: 10px 2px; font-size: 14px; font-weight: 600; color: var(--steel); cursor: pointer; font-family: 'Inter', sans-serif; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ts-subnav button.active { color: var(--teal-deep); border-bottom-color: var(--teal-deep); }
+.ts-subnav button:hover { color: var(--teal-deep); }
+
+/* Tests : cartes de sélection du type de test */
+.ts-testtype-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.ts-testtype-card { flex: 1 1 200px; min-width: 180px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; cursor: pointer; font-family: 'Inter', sans-serif; }
+.ts-testtype-card:hover { border-color: var(--teal-mid); }
+.ts-testtype-card.active { border-color: var(--teal-deep); border-width: 2px; background: var(--surface-alt); }
+.ts-testtype-name { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+.ts-testtype-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.ts-testtype-done { margin-top: 10px; font-size: 12px; color: #1F7A4C; font-weight: 600; }
+
+.ts-badge { display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--steel); background: var(--surface-alt); border: 1px solid var(--line); border-radius: 20px; padding: 3px 9px; }
+.ts-badge-amber { color: #8A5A17; background: #FBF0DD; border-color: #EBD6A8; }
+
+/* Tests : badge de résultat et historique */
+.ts-result-badge { font-size: 11px; font-weight: 600; color: var(--steel); background: var(--surface-alt); border: 1px solid var(--line); border-radius: 20px; padding: 4px 10px; white-space: nowrap; }
+.ts-result-badge-fail { color: #9B3B3B; background: #FBEAEA; border-color: #F0C9C9; }
+.ts-test-detail { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; padding: 4px 0 10px 40px; }
+.ts-result-history { padding: 0 0 10px 40px; }
+.ts-result-history-entry { font-size: 12.5px; color: var(--ink); background: var(--surface-alt); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+.ts-result-history-note { color: var(--steel); margin-top: 3px; font-style: italic; }
+
+/* Tests : carte de confirmation « Signaler un échec » */
+.ts-fail-card { margin: 0 0 10px 40px; max-width: 460px; border: 1px solid #F0C9C9; background: #FBEAEA; border-radius: 8px; padding: 14px; }
+.ts-fail-title { font-weight: 700; font-size: 13.5px; color: #9B3B3B; }
+.ts-fail-sub { font-size: 12px; color: #9B3B3B; margin-top: 3px; opacity: 0.85; }
+.ts-fail-note { width: 100%; box-sizing: border-box; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: 'Inter', sans-serif; resize: vertical; min-height: 54px; }
+.ts-fail-actions { display: flex; gap: 10px; margin-top: 10px; }
+
+/* Tests : admin des types de test */
+.ts-checkbox-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; }
+.ts-checkbox-field { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap; }
+.ts-checkbox-field input { margin: 0; }
+.ts-testtype-admin-list { display: flex; flex-direction: column; gap: 8px; }
+.ts-testtype-admin-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.ts-testtype-name-input { flex: 1 1 200px; font-weight: 600; font-size: 14px; font-family: 'Inter', sans-serif; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; color: var(--ink); background: var(--surface); }
+.ts-testtype-admin-row select { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: 'Inter', sans-serif; background: var(--surface); color: var(--ink); }
 
 /* Connexion */
 .ts-login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: linear-gradient(160deg, #0F3D3D 0%, #17514F 55%, #1F5C5C 100%); font-family: 'Inter', sans-serif; box-sizing: border-box; }
@@ -1180,6 +2014,25 @@ const css = `
     font-size: 34px;
     text-align: center;
     white-space: nowrap;
+  }
+  /* Étiquette de TEST uniquement (.ts-label-has-test) : la colonne gauche a
+     une 3e ligne (nom du test) que l'étiquette de sachet n'a pas — tailles
+     réduites spécifiquement pour cette variante (vérifié par mesure isolée,
+     marge confortable même avec les noms de test les plus longs) sans
+     toucher aux tailles de l'étiquette de sachet ci-dessus, déjà vérifiées
+     et en production.
+  */
+  #ts-printable .ts-label-has-test .ts-label-testname {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  #ts-printable .ts-label-has-test .ts-label-site,
+  #ts-printable .ts-label-has-test .ts-label-date,
+  #ts-printable .ts-label-has-test .ts-label-cycle {
+    font-size: 10px;
+  }
+  #ts-printable .ts-label-has-test .ts-label-num {
+    font-size: 28px;
   }
 }
 `;

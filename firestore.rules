@@ -18,6 +18,19 @@ service cloud.firestore {
       match /charges/{chargeId} {
         allow read, write: if request.auth != null;
       }
+
+      // ... et sa propre sous-collection de tests (indicateurs biologiques/
+      // chimiques), séparée des charges mais sous le même stérilisateur —
+      // c'est de là que vient le numéro de cycle qu'un test consomme.
+      match /tests/{testId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+
+    // Les types de test (config) ne sont PAS sous sterilisateurs — bloc à
+    // part, mais même isolation par site.
+    match /sites/{site}/testTypes/{testTypeId} {
+      allow read, write: if request.auth != null;
     }
   }
 }
