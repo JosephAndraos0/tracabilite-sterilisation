@@ -49,15 +49,28 @@ const isoWeekStart = (iso) => {
   return d.toISOString().slice(0, 10);
 };
 
-// Noms temporaires — à remplacer une fois les vrais noms de tests confirmés
-// par la clinique. Les 3 types sont pré-remplis au premier chargement de
-// l'onglet Tests, et restent entièrement modifiables ensuite (y compris
-// « charge vide », qu'on ne sait pas encore associer au bon type).
+// Types de test pré-remplis au premier chargement de l'onglet Tests, puis
+// entièrement modifiables. Confirmés par la clinique : Bowie-Dick (quotidien,
+// seul dans le stérilisateur = charge vide, 1 étiquette) et IB (hebdomadaire,
+// dans une charge pleine = plusieurs étiquettes). Le 2e test quotidien n'a
+// pas encore de nom : « Test quotidien B » reste un libellé temporaire.
 const DEFAULT_TEST_TYPES = [
-  { name: "Test quotidien A", frequency: "quotidien", beforeDayStart: true, emptyLoad: false, active: true },
+  { name: "Test Bowie-Dick", frequency: "quotidien", beforeDayStart: true, emptyLoad: true, active: true },
   { name: "Test quotidien B", frequency: "quotidien", beforeDayStart: false, emptyLoad: false, active: true },
-  { name: "Test hebdomadaire", frequency: "hebdomadaire", beforeDayStart: false, emptyLoad: false, active: true },
+  { name: "Test IB", frequency: "hebdomadaire", beforeDayStart: false, emptyLoad: false, active: true },
 ];
+
+// Les sites qui ont déjà ouvert l'onglet Tests ont les anciens libellés
+// temporaires en base. On ne renomme que ceux qui portent encore EXACTEMENT
+// le libellé d'origine (un nom modifié à la main n'est jamais touché).
+const PLACEHOLDER_MIGRATIONS = {
+  "Test quotidien A": { name: "Test Bowie-Dick", emptyLoad: true },
+  "Test hebdomadaire": { name: "Test IB" },
+};
+const MAX_TEST_LABELS = 50;
+
+// Les tests créés avant l'ajout de plusieurs étiquettes n'ont qu'un champ code.
+const testLabels = (test) => test.labels || [{ code: test.code, index: 1 }];
 const genSachetCode = () =>
   "#" + Math.floor(1000000 + Math.random() * 9000000).toString();
 
@@ -302,14 +315,27 @@ export default function App() {
         );
         setTestTypes(sortTestTypes(created));
       } else {
-        setTestTypes(sortTestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+        const types = await Promise.all(
+          snap.docs.map(async (d) => {
+            const t = { id: d.id, ...d.data() };
+            const patch = PLACEHOLDER_MIGRATIONS[t.name];
+            if (!patch) return t;
+            try {
+              await updateDoc(siteDoc("testTypes", d.id), patch);
+              return { ...t, ...patch };
+            } catch {
+              return t;
+            }
+          })
+        );
+        setTestTypes(sortTestTypes(types));
       }
       setErr("");
     } catch {
       setTestTypes((prev) => prev || []);
       setErr("Connexion à la base impossible pour les types de test. Vérifie le réseau.");
     }
-  }, [siteCol]);
+  }, [siteCol, siteDoc]);
 
   const addTestType = useCallback(
     async (name, frequency, beforeDayStart, emptyLoad) => {
@@ -345,7 +371,17 @@ export default function App() {
   // tests du stérilisateur au lieu de charges, et fige une copie du type de
   // test choisi (comme sterilizerName est figé sur une charge).
   const startTest = useCallback(
-    async (sterilizerId, testType) => {
+    async (sterilizerId, testType, quantity = 1) => {
+      // Un test à charge vide n'a toujours qu'une étiquette ; les autres
+      // (charge pleine) peuvent en imprimer plusieurs, chacune avec son code.
+      const count = testType.emptyLoad
+        ? 1
+        : Math.min(MAX_TEST_LABELS, Math.max(1, Math.floor(Number(quantity)) || 1));
+      const labels = [];
+      while (labels.length < count) {
+        const code = genSachetCode();
+        if (!labels.some((l) => l.code === code)) labels.push({ code, index: labels.length + 1 });
+      }
       const sterilizerRef = siteDoc("sterilisateurs", sterilizerId);
       const testRef = doc(siteCol("sterilisateurs", sterilizerId, "tests"));
       const test = await runTransaction(db, async (tx) => {
@@ -365,7 +401,8 @@ export default function App() {
           frequency: testType.frequency,
           beforeDayStart: testType.beforeDayStart,
           emptyLoad: testType.emptyLoad,
-          code: genSachetCode(),
+          code: labels[0].code,
+          labels,
           result: "pass",
           resultConfirmed: false,
           resultHistory: [],
@@ -1109,7 +1146,7 @@ function DatabasesPanel({ site, sterilizers, fetchHistoryForSterilizer }) {
 }
 
 /* ---------------- Tests ---------------- */
-function TestLabelCard({ test }) {
+function TestLabelCard({ test, code }) {
   return (
     <div className="ts-label ts-label-has-test">
       <div className="ts-label-grid">
@@ -1130,7 +1167,7 @@ function TestLabelCard({ test }) {
           <div className="ts-label-cycle">CYCLE {test.cycleNumber}</div>
         </div>
       </div>
-      <div className="ts-label-num">{test.code}</div>
+      <div className="ts-label-num">{code || test.code}</div>
     </div>
   );
 }
@@ -1192,6 +1229,7 @@ function TestsPanel({
 function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
   const [sterilizerId, setSterilizerId] = useState(sterilizers[0]?.id || "");
   const [selectedTypeId, setSelectedTypeId] = useState(null);
+  const [quantity, setQuantity] = useState("1");
   const [doneMap, setDoneMap] = useState({});
   const [session, setSession] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1235,6 +1273,11 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
 
   const sterilizer = sterilizers.find((s) => s.id === sterilizerId);
   const selectedType = activeTypes.find((t) => t.id === selectedTypeId);
+  // Charge vide = toujours 1 étiquette ; charge pleine = quantité saisie (1 à MAX).
+  const labelCount =
+    !selectedType || selectedType.emptyLoad
+      ? 1
+      : Math.min(MAX_TEST_LABELS, Math.max(1, Math.floor(Number(quantity)) || 1));
 
   // Imprime une fois dès que l'enregistrement créé est disponible — déclenché
   // par effet (pas en synchrone juste après le await) pour laisser React
@@ -1249,7 +1292,7 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
     setBusy(true);
     setError("");
     try {
-      const test = await onStartTest(sterilizer.id, selectedType);
+      const test = await onStartTest(sterilizer.id, selectedType, labelCount);
       setSession(test);
     } catch {
       setError("Erreur en démarrant le test. Réessaie.");
@@ -1261,6 +1304,7 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
   const reset = () => {
     setSession(null);
     setSelectedTypeId(null);
+    setQuantity("1");
     setError("");
   };
 
@@ -1281,7 +1325,8 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
               Cycle {session.cycleNumber} · {session.sterilizerName}
             </div>
             <div className="ts-sheet-sub">
-              {session.testTypeName} · {formatDateFR(session.date)}
+              {session.testTypeName} · {formatDateFR(session.date)} · {testLabels(session).length}{" "}
+              étiquette(s)
             </div>
           </div>
         </div>
@@ -1296,7 +1341,9 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
         </div>
 
         <div className="ts-labels-grid" id="ts-printable" style={{ marginTop: 18 }}>
-          <TestLabelCard test={session} />
+          {testLabels(session).map((l) => (
+            <TestLabelCard key={l.code} test={session} code={l.code} />
+          ))}
         </div>
       </div>
     );
@@ -1334,7 +1381,10 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
               key={t.id}
               type="button"
               className={"ts-testtype-card" + (selectedTypeId === t.id ? " active" : "")}
-              onClick={() => setSelectedTypeId(t.id)}
+              onClick={() => {
+                setSelectedTypeId(t.id);
+                setQuantity("1");
+              }}
             >
               <div className="ts-testtype-name">{t.name}</div>
               <div className="ts-testtype-badges">
@@ -1365,6 +1415,28 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
           <div>
             <span className="ts-mono-label">Cycle</span>
             <span className="ts-mono-val">{sterilizer ? sterilizer.nextCycle : "—"}</span>
+          </div>
+          <div>
+            <span className="ts-mono-label">Étiquettes</span>
+            <span className="ts-mono-val">{labelCount}</span>
+          </div>
+        </div>
+      )}
+
+      {selectedType && !selectedType.emptyLoad && (
+        <div className="ts-form-row" style={{ marginTop: 14 }}>
+          <div className="ts-field ts-field-narrow">
+            <label>Nombre d'étiquettes</label>
+            <input
+              type="number"
+              min="1"
+              max={MAX_TEST_LABELS}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+          </div>
+          <div className="ts-list-item-sub" style={{ paddingBottom: 10 }}>
+            Charge pleine : une étiquette par sachet à identifier.
           </div>
         </div>
       )}
@@ -1533,8 +1605,14 @@ function TestHistory({ sterilizers, testTypes, fetchTests, onReportFailure }) {
                 <div className="ts-sublist">
                   <div className="ts-test-detail">
                     <div>
-                      <span className="ts-mono-label">Code</span>
-                      <span className="ts-mono-val">{t.code}</span>
+                      <span className="ts-mono-label">
+                        {testLabels(t).length > 1 ? `Codes (${testLabels(t).length} étiquettes)` : "Code"}
+                      </span>
+                      <span className="ts-mono-val">
+                        {testLabels(t).length > 1
+                          ? testLabels(t).map((l) => l.code).join("  ")
+                          : t.code}
+                      </span>
                     </div>
                     <div>
                       <span className="ts-mono-label">Fréquence</span>
@@ -1602,7 +1680,9 @@ function TestHistory({ sterilizers, testTypes, fetchTests, onReportFailure }) {
       {/* Zone imprimable hors écran : réimpression d'un test existant */}
       {printTest && (
         <div className="ts-labels-grid ts-print-offscreen" id="ts-printable">
-          <TestLabelCard test={printTest} />
+          {testLabels(printTest).map((l) => (
+            <TestLabelCard key={l.code} test={printTest} code={l.code} />
+          ))}
         </div>
       )}
     </div>
