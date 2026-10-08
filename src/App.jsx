@@ -364,6 +364,22 @@ export default function App() {
     [siteDoc]
   );
 
+  // Les tests déjà enregistrés gardent le nom du type figé dans leur propre
+  // document : supprimer un type ne change ni les étiquettes ni l'historique.
+  const removeTestType = useCallback(
+    async (id) => {
+      const before = testTypes;
+      setTestTypes((prev) => (prev ? prev.filter((t) => t.id !== id) : prev));
+      try {
+        await deleteDoc(siteDoc("testTypes", id));
+      } catch {
+        setTestTypes(before);
+        setErr("Erreur en supprimant le type de test.");
+      }
+    },
+    [siteDoc, testTypes]
+  );
+
   // Jumeau exact de startCharge : même transaction (réserve le cycle au
   // moment de la création, pas à une étape de confirmation ultérieure —
   // voir le compte rendu pour la justification), même protection contre les
@@ -557,6 +573,7 @@ export default function App() {
               testTypes={testTypes}
               onAddTestType={addTestType}
               onUpdateTestType={updateTestType}
+              onRemoveTestType={removeTestType}
               onStartTest={startTest}
               fetchTests={fetchTests}
               onReportFailure={reportTestFailure}
@@ -1177,6 +1194,7 @@ function TestsPanel({
   testTypes,
   onAddTestType,
   onUpdateTestType,
+  onRemoveTestType,
   onStartTest,
   fetchTests,
   onReportFailure,
@@ -1220,14 +1238,21 @@ function TestsPanel({
           onReportFailure={onReportFailure}
         />
       ) : (
-        <TestTypesAdmin testTypes={testTypes} onAdd={onAddTestType} onUpdate={onUpdateTestType} />
+        <TestTypesAdmin
+          testTypes={testTypes}
+          onAdd={onAddTestType}
+          onUpdate={onUpdateTestType}
+          onRemove={onRemoveTestType}
+        />
       )}
     </div>
   );
 }
 
 function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
-  const [sterilizerId, setSterilizerId] = useState(sterilizers[0]?.id || "");
+  // Le stérilisateur se choisit explicitement (un test imprimé pour la mauvaise
+  // machine consomme quand même un cycle) — sauf s'il n'y en a qu'un seul.
+  const [sterilizerId, setSterilizerId] = useState(sterilizers.length === 1 ? sterilizers[0].id : "");
   const [selectedTypeId, setSelectedTypeId] = useState(null);
   const [quantity, setQuantity] = useState("1");
   const [doneMap, setDoneMap] = useState({});
@@ -1236,7 +1261,7 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!sterilizerId && sterilizers.length) setSterilizerId(sterilizers[0].id);
+    if (!sterilizerId && sterilizers.length === 1) setSterilizerId(sterilizers[0].id);
   }, [sterilizers, sterilizerId]);
 
   const activeTypes = testTypes.filter((t) => t.active !== false);
@@ -1351,26 +1376,30 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
 
   return (
     <div className="ts-card">
-      <div className="ts-form-row">
-        <div className="ts-field">
-          <label>Stérilisateur</label>
-          <select
-            value={sterilizerId}
-            onChange={(e) => {
-              setSterilizerId(e.target.value);
+      <div className="ts-section-label">Stérilisateur</div>
+      <div className="ts-sterilizer-grid">
+        {sterilizers.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={"ts-sterilizer-btn" + (sterilizerId === s.id ? " active" : "")}
+            onClick={() => {
+              setSterilizerId(s.id);
               setSelectedTypeId(null);
+              setQuantity("1");
             }}
           >
-            {sterilizers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            <div className="ts-sterilizer-name">{s.name}</div>
+            <div className="ts-sterilizer-sub">Prochain cycle : {s.nextCycle}</div>
+          </button>
+        ))}
       </div>
 
-      {activeTypes.length === 0 ? (
+      {!sterilizerId ? (
+        <div className="ts-empty" style={{ marginTop: 16 }}>
+          Choisis d'abord un stérilisateur.
+        </div>
+      ) : activeTypes.length === 0 ? (
         <div className="ts-empty" style={{ marginTop: 16 }}>
           Aucun type de test configuré. Ajoute-en un dans l'onglet « Types de test ».
         </div>
@@ -1404,6 +1433,10 @@ function NewTestFlow({ sterilizers, testTypes, onStartTest, fetchTests }) {
 
       {selectedType && (
         <div className="ts-preview-strip" style={{ marginTop: 18 }}>
+          <div>
+            <span className="ts-mono-label">Stérilisateur</span>
+            <span className="ts-mono-val">{sterilizer ? sterilizer.name : "—"}</span>
+          </div>
           <div>
             <span className="ts-mono-label">Test</span>
             <span className="ts-mono-val">{selectedType.name}</span>
@@ -1689,11 +1722,12 @@ function TestHistory({ sterilizers, testTypes, fetchTests, onReportFailure }) {
   );
 }
 
-function TestTypesAdmin({ testTypes, onAdd, onUpdate }) {
+function TestTypesAdmin({ testTypes, onAdd, onUpdate, onRemove }) {
   const [name, setName] = useState("");
   const [frequency, setFrequency] = useState("quotidien");
   const [beforeDayStart, setBeforeDayStart] = useState(false);
   const [emptyLoad, setEmptyLoad] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const add = () => {
     if (!name.trim()) return;
@@ -1778,10 +1812,41 @@ function TestTypesAdmin({ testTypes, onAdd, onUpdate }) {
                 />
                 Actif
               </label>
+              {confirmDeleteId === t.id ? (
+                <div className="ts-delete-confirm">
+                  <span>
+                    Supprimer « {t.name} » ? Les tests déjà enregistrés gardent leur nom.
+                  </span>
+                  <button
+                    className="ts-btn ts-btn-stop ts-btn-small"
+                    onClick={() => {
+                      onRemove(t.id);
+                      setConfirmDeleteId(null);
+                    }}
+                  >
+                    Supprimer
+                  </button>
+                  <button className="ts-btn ts-btn-ghost ts-btn-small" onClick={() => setConfirmDeleteId(null)}>
+                    Annuler
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="ts-btn ts-btn-ghost ts-btn-small"
+                  disabled={testTypes.length <= 1}
+                  title={testTypes.length <= 1 ? "Garde au moins un type de test" : undefined}
+                  onClick={() => setConfirmDeleteId(t.id)}
+                >
+                  Supprimer
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
+      <div className="ts-list-item-sub" style={{ marginTop: 10 }}>
+        Astuce : décocher « Actif » masque un type sans le supprimer.
+      </div>
     </div>
   );
 }
@@ -1965,6 +2030,13 @@ const css = `
 .ts-subnav button:hover { color: var(--teal-deep); }
 
 /* Tests : cartes de sélection du type de test */
+.ts-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--steel); font-weight: 600; margin-bottom: 10px; }
+.ts-sterilizer-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.ts-sterilizer-btn { min-width: 140px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); }
+.ts-sterilizer-btn:hover { border-color: var(--teal-mid); }
+.ts-sterilizer-btn.active { border-color: var(--teal-deep); border-width: 2px; padding: 11px 15px; background: var(--surface-alt); }
+.ts-sterilizer-name { font-weight: 700; font-size: 14px; }
+.ts-sterilizer-sub { font-size: 11.5px; color: var(--steel); margin-top: 3px; }
 .ts-testtype-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .ts-testtype-card { flex: 1 1 200px; min-width: 180px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; cursor: pointer; font-family: 'Inter', sans-serif; }
 .ts-testtype-card:hover { border-color: var(--teal-mid); }
@@ -1998,6 +2070,8 @@ const css = `
 .ts-testtype-admin-list { display: flex; flex-direction: column; gap: 8px; }
 .ts-testtype-admin-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .ts-testtype-name-input { flex: 1 1 200px; font-weight: 600; font-size: 14px; font-family: 'Inter', sans-serif; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; color: var(--ink); background: var(--surface); }
+.ts-btn-small { flex: 0 0 auto; padding: 7px 12px; font-size: 12px; }
+.ts-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; background: #FBEAEA; border: 1px solid #F0C9C9; border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: #9B3B3B; }
 .ts-testtype-admin-row select { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: 'Inter', sans-serif; background: var(--surface); color: var(--ink); }
 
 /* Connexion */
