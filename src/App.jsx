@@ -662,14 +662,16 @@ function SterilizersPanel({ sterilizers, onAdd, onUpdateCycle, onRemove }) {
 
 /* ---------------- Nouvelle charge ---------------- */
 function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
-  const [sterilizerId, setSterilizerId] = useState(sterilizers[0]?.id || "");
+  // Choix explicite quand il y a plusieurs machines (une charge démarrée sur
+  // la mauvaise consomme quand même un cycle) ; d'office s'il n'y en a qu'une.
+  const [sterilizerId, setSterilizerId] = useState(sterilizers.length === 1 ? sterilizers[0].id : "");
   const [session, setSession] = useState(null);
   const [sachets, setSachets] = useState([]);
   const [busyStart, setBusyStart] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!sterilizerId && sterilizers.length) setSterilizerId(sterilizers[0].id);
+    if (!sterilizerId && sterilizers.length === 1) setSterilizerId(sterilizers[0].id);
   }, [sterilizers, sterilizerId]);
 
   const sterilizer = sterilizers.find((s) => s.id === sterilizerId);
@@ -732,20 +734,26 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
 
       {!session ? (
         <div className="ts-card">
-          <div className="ts-form-row">
-            <div className="ts-field">
-              <label>Stérilisateur</label>
-              <select value={sterilizerId} onChange={(e) => setSterilizerId(e.target.value)}>
-                {sterilizers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="ts-section-label">Stérilisateur</div>
+          <div className="ts-sterilizer-grid">
+            {sterilizers.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={"ts-sterilizer-btn" + (sterilizerId === s.id ? " active" : "")}
+                onClick={() => setSterilizerId(s.id)}
+              >
+                <div className="ts-sterilizer-name">{s.name}</div>
+                <div className="ts-sterilizer-sub">Prochain cycle : {s.nextCycle}</div>
+              </button>
+            ))}
           </div>
 
           <div className="ts-preview-strip">
+            <div>
+              <span className="ts-mono-label">Stérilisateur</span>
+              <span className="ts-mono-val">{sterilizer ? sterilizer.name : "—"}</span>
+            </div>
             <div>
               <span className="ts-mono-label">Date</span>
               <span className="ts-mono-val">{formatDateFR(todayISO())}</span>
@@ -758,8 +766,12 @@ function NewChargePanel({ sterilizers, onStartCharge, onAddSachet }) {
 
           {error && <div className="ts-error" style={{ marginTop: 14 }}>{error}</div>}
 
-          <button className="ts-btn ts-btn-primary ts-btn-wide" onClick={start} disabled={busyStart}>
-            {busyStart ? "Démarrage…" : "Démarrer la charge"}
+          <button
+            className="ts-btn ts-btn-primary ts-btn-wide"
+            onClick={start}
+            disabled={busyStart || !sterilizer}
+          >
+            {busyStart ? "Démarrage…" : sterilizer ? "Démarrer la charge" : "Choisis un stérilisateur"}
           </button>
         </div>
       ) : (
@@ -2032,7 +2044,7 @@ const css = `
 /* Tests : cartes de sélection du type de test */
 .ts-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--steel); font-weight: 600; margin-bottom: 10px; }
 .ts-sterilizer-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-.ts-sterilizer-btn { min-width: 140px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); }
+.ts-sterilizer-btn { min-width: 140px; min-height: 60px; text-align: left; touch-action: manipulation; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); }
 .ts-sterilizer-btn:hover { border-color: var(--teal-mid); }
 .ts-sterilizer-btn.active { border-color: var(--teal-deep); border-width: 2px; padding: 11px 15px; background: var(--surface-alt); }
 .ts-sterilizer-name { font-weight: 700; font-size: 14px; }
